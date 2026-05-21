@@ -74,6 +74,17 @@ class ChooserScreen(Gtk.Box):
         self.progress.set_visible(False)
         self.append(self.progress)
 
+        self.log_scroller = Gtk.ScrolledWindow()
+        self.log_scroller.set_min_content_height(180)
+        self.log_scroller.set_vexpand(True)
+        self.log_view = Gtk.TextView()
+        self.log_view.set_editable(False)
+        self.log_view.set_cursor_visible(False)
+        self.log_view.set_monospace(True)
+        self.log_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.log_scroller.set_child(self.log_view)
+        self.append(self.log_scroller)
+
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_halign(Gtk.Align.END)
         self.launch_button = Gtk.Button(label="Launch")
@@ -136,9 +147,24 @@ class ChooserScreen(Gtk.Box):
             self.profile_combo.set_selected(items.index(wanted))
         self.delete_profile_button.set_sensitive(bool(on_disk))
 
+    def _set_status(self, message: str, *, log: bool = True) -> None:
+        self.status.set_label(message)
+        if log and message:
+            self._append_log(message)
+
+    def _append_log(self, message: str) -> None:
+        buf = self.log_view.get_buffer()
+        if buf.get_char_count() > 0:
+            buf.insert(buf.get_end_iter(), "\n")
+        buf.insert(buf.get_end_iter(), message)
+        self.log_view.scroll_to_iter(buf.get_end_iter(), 0.0, False, 0.0, 0.0)
+
+    def _clear_log(self) -> None:
+        self.log_view.get_buffer().set_text("")
+
     def _on_install_clicked(self, *_args) -> None:
         self.install_button.set_sensitive(False)
-        self.status.set_label("Looking up Minecraft versions…")
+        self._set_status("Looking up Minecraft versions…")
 
         def fetch():
             return self._provider.release_choices()
@@ -150,7 +176,7 @@ class ChooserScreen(Gtk.Box):
 
         def failed(exc):
             self.install_button.set_sensitive(True)
-            self.status.set_label(f"Lookup failed: {exc}")
+            self._set_status(f"Lookup failed: {exc}")
 
         worker.run(fetch, on_done=done, on_error=failed)
 
@@ -212,7 +238,8 @@ class ChooserScreen(Gtk.Box):
         dialog.present()
 
     def _do_install(self, version: str) -> None:
-        self.status.set_label(f"Installing Minecraft {version}…")
+        self._clear_log()
+        self._set_status(f"Installing Minecraft {version}…")
         self.progress.set_visible(True)
         self.progress.set_fraction(0.0)
         self.progress.set_text("")
@@ -231,7 +258,7 @@ class ChooserScreen(Gtk.Box):
             GLib.idle_add(push)
 
         def set_status(message: str):
-            GLib.idle_add(self.status.set_label, message)
+            GLib.idle_add(self._set_status, message)
 
         def install():
             return self._provider.install(
@@ -244,7 +271,7 @@ class ChooserScreen(Gtk.Box):
         def done(_result):
             self.progress.set_visible(False)
             self.install_button.set_sensitive(True)
-            self.status.set_label(f"Minecraft {version} installed.")
+            self._set_status(f"Minecraft {version} installed.")
             self._refresh_versions()
             self._refresh_profiles()
 
@@ -252,7 +279,7 @@ class ChooserScreen(Gtk.Box):
             self.progress.set_visible(False)
             self.install_button.set_sensitive(True)
             self.launch_button.set_sensitive(bool(self._provider.list_installed()))
-            self.status.set_label(f"Install failed: {exc}")
+            self._set_status(f"Install failed: {exc}")
 
         worker.run(install, on_done=done, on_error=failed)
 
@@ -282,13 +309,13 @@ class ChooserScreen(Gtk.Box):
             dialog.close()
             try:
                 self._provider.ensure_profile(self.context.username, name)
-                self.status.set_label(f"Created profile “{name}”.")
+                self._set_status(f"Created profile “{name}”.")
                 self._refresh_profiles()
                 profiles = self._provider.list_profiles(self.context.username)
                 if name in profiles:
                     self.profile_combo.set_selected(profiles.index(name))
             except OSError as exc:
-                self.status.set_label(f"Create failed: {exc}")
+                self._set_status(f"Create failed: {exc}")
 
         create.connect("clicked", go)
         entry.connect("activate", go)
@@ -321,10 +348,10 @@ class ChooserScreen(Gtk.Box):
             dialog.close()
             try:
                 self._provider.delete_profile(self.context.username, profile)
-                self.status.set_label(f"Deleted profile “{profile}”.")
+                self._set_status(f"Deleted profile “{profile}”.")
                 self._refresh_profiles()
             except OSError as exc:
-                self.status.set_label(f"Delete failed: {exc}")
+                self._set_status(f"Delete failed: {exc}")
 
         confirm.connect("clicked", go)
         actions.append(confirm)
@@ -358,10 +385,10 @@ class ChooserScreen(Gtk.Box):
             dialog.close()
             try:
                 self._provider.delete_version(version)
-                self.status.set_label(f"Deleted Minecraft {version}.")
+                self._set_status(f"Deleted Minecraft {version}.")
                 self._refresh_versions()
             except OSError as exc:
-                self.status.set_label(f"Delete failed: {exc}")
+                self._set_status(f"Delete failed: {exc}")
 
         confirm.connect("clicked", go)
         actions.append(confirm)
@@ -377,7 +404,8 @@ class ChooserScreen(Gtk.Box):
         self._provider.ensure_profile(self.context.username, profile)
         self._save_last_launch(version, profile)
         self.launch_button.set_sensitive(False)
-        self.status.set_label("Launching Minecraft…")
+        self._clear_log()
+        self._set_status("Launching Minecraft…")
 
         selection = LaunchSelection(
             provider=paths.PROVIDER_MINECRAFT,
@@ -392,12 +420,12 @@ class ChooserScreen(Gtk.Box):
 
         def done(rc):
             self.launch_button.set_sensitive(True)
-            self.status.set_label(f"Minecraft exited (status {rc}).")
+            self._set_status(f"Minecraft exited (status {rc}).")
             self._refresh_versions()
             self._refresh_profiles()
 
         def failed(exc):
             self.launch_button.set_sensitive(True)
-            self.status.set_label(f"Launch failed: {exc}")
+            self._set_status(f"Launch failed: {exc}")
 
         worker.run(do_launch, on_done=done, on_error=failed)
