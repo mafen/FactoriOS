@@ -15,8 +15,9 @@ from .context import UserContext
 
 class GreeterWindow(Gtk.ApplicationWindow):
     def __init__(self, application: Gtk.Application) -> None:
-        super().__init__(application=application, title="MinecraftOS")
+        super().__init__(application=application, title="GameOS")
         self.set_default_size(720, 520)
+        self.set_resizable(True)
         # Don't call self.fullscreen() — under labwc on VirtualBox's vmwgfx,
         # the fullscreen mode-set triggers a DRM hot-unplug of the virtual
         # connector (~13s after start), which kills the compositor and
