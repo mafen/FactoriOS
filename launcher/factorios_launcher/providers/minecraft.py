@@ -36,6 +36,8 @@ ARCH_NAME = "64" if platform.machine().lower() in {"x86_64", "amd64"} else platf
 RULE_OS = "linux"
 LAUNCHER_BRAND = "GameOS"
 LAUNCHER_VERSION = "0.1"
+SYSTEM_JAVA_COMPONENT = "system-java"
+SYSTEM_JAVA_PACKAGE = "jre21-openjdk"
 JAVA_RUNTIME_CANDIDATES = (
     "java-runtime-gamma",
     "java-runtime-beta",
@@ -203,8 +205,10 @@ class MinecraftProvider(GameProvider):
             raise MinecraftError(f"Minecraft version {selection.version} is missing a main class.")
         profile_dir = self.ensure_profile(selection.username, selection.profile)
         runtime = self._runtime_executable(meta)
-        if not runtime.is_file():
-            raise MinecraftError("Managed Java runtime is missing.")
+        if runtime is None or not runtime.is_file():
+            raise MinecraftError(
+                f"Java runtime is missing. Reinstall the selected version or install {SYSTEM_JAVA_PACKAGE}."
+            )
 
         natives_dir = version_dir / "natives"
         classpath = self._classpath(meta, selection.version)
@@ -216,11 +220,14 @@ class MinecraftProvider(GameProvider):
         ]
         env = os.environ.copy()
         env["MESA_GL_VERSION_OVERRIDE"] = env.get("MESA_GL_VERSION_OVERRIDE", "4.5")
+        runtime_component = ((meta.get("_gameos") or {}).get("runtime_component")) or (
+            (meta.get("javaVersion") or {}).get("component")
+        )
         self._write_instance_meta(
             selection.username,
             selection.profile,
             selected_version=selection.version,
-            java_component=((meta.get("javaVersion") or {}).get("component")),
+            java_component=runtime_component,
             last_launched_version=selection.version,
         )
         return subprocess.Popen(args, cwd=profile_dir, env=env)
@@ -309,7 +316,17 @@ class MinecraftProvider(GameProvider):
         status: StatusCb | None = None,
     ) -> str:
         requested_component = ((version_meta.get("javaVersion") or {}).get("component")) or "jre-legacy"
-        component = _resolve_runtime_component(http, requested_component)
+        system_java = _system_java_executable()
+        try:
+            component = _resolve_runtime_component(http, requested_component)
+        except MinecraftError as exc:
+            if system_java is not None:
+                _push_status(
+                    status,
+                    f"Managed runtime {requested_component} is unavailable; using system Java.",
+                )
+                return SYSTEM_JAVA_COMPONENT
+            raise MinecraftError(f"{exc} Install {SYSTEM_JAVA_PACKAGE} or rebuild the appliance image.") from exc
         if component != requested_component:
             _push_status(
                 status,
@@ -325,11 +342,27 @@ class MinecraftProvider(GameProvider):
         feed = _fetch_json(http, JAVA_RUNTIME_URL.format(component=component), f"Java runtime feed for {component}")
         candidates = feed.get(OS_NAME) or []
         if not candidates:
-            raise MinecraftError(f"No managed Java runtime published for {component} on {OS_NAME}.")
+            if system_java is not None:
+                _push_status(
+                    status,
+                    f"Managed runtime {component} has no {OS_NAME} build; using system Java.",
+                )
+                return SYSTEM_JAVA_COMPONENT
+            raise MinecraftError(
+                f"No managed Java runtime published for {component} on {OS_NAME}. Install {SYSTEM_JAVA_PACKAGE} or rebuild the appliance image."
+            )
         manifest_info = candidates[0].get("manifest") or {}
         manifest_url = manifest_info.get("url")
         if not manifest_url:
-            raise MinecraftError(f"Runtime manifest for {component} is missing a URL.")
+            if system_java is not None:
+                _push_status(
+                    status,
+                    f"Managed runtime {component} is incomplete; using system Java.",
+                )
+                return SYSTEM_JAVA_COMPONENT
+            raise MinecraftError(
+                f"Runtime manifest for {component} is missing a URL. Install {SYSTEM_JAVA_PACKAGE} or rebuild the appliance image."
+            )
         manifest = _fetch_json(http, manifest_url, f"Java runtime manifest for {component}")
 
         temp_root = runtime_home.with_name(f".{runtime_home.name}.tmp")
@@ -366,9 +399,11 @@ class MinecraftProvider(GameProvider):
         version_marker.write_text(json.dumps(candidates[0].get("version", {}), indent=2))
         return component
 
-    def _runtime_executable(self, version_meta: dict) -> Path:
+    def _runtime_executable(self, version_meta: dict) -> Path | None:
         component = ((version_meta.get("javaVersion") or {}).get("component")) or "jre-legacy"
         gameos_component = ((version_meta.get("_gameos") or {}).get("runtime_component")) or component
+        if gameos_component == SYSTEM_JAVA_COMPONENT:
+            return _system_java_executable()
         return paths.provider_runtimes(self.id) / gameos_component / "bin" / "java"
 
     def _classpath(self, version_meta: dict, version: str) -> str:
@@ -466,6 +501,13 @@ class MinecraftProvider(GameProvider):
 def _push_status(status: StatusCb | None, message: str) -> None:
     if status:
         status(message)
+
+
+def _system_java_executable() -> Path | None:
+    java = shutil.which("java")
+    if not java:
+        return None
+    return Path(java)
 
 
 def _fetch_json(http: requests.Session, url: str, label: str) -> dict:

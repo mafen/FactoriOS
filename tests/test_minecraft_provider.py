@@ -165,6 +165,61 @@ class MinecraftProviderTests(unittest.TestCase):
 
         self.assertEqual(resolved, "java-runtime-gamma")
 
+    def test_install_runtime_falls_back_to_system_java_when_no_managed_feed_exists(self):
+        provider = MinecraftProvider()
+        http = FakeHTTP({})
+        version_meta = {"javaVersion": {"component": "java-runtime-epsilon"}}
+        messages: list[str] = []
+
+        with (
+            mock.patch("factorios_launcher.providers.minecraft._resolve_runtime_component", side_effect=MinecraftError("missing")),
+            mock.patch("factorios_launcher.providers.minecraft.shutil.which", return_value="/usr/bin/java"),
+        ):
+            resolved = provider._install_runtime(http, version_meta, status=messages.append)
+
+        self.assertEqual(resolved, "system-java")
+        self.assertTrue(any("using system Java" in message for message in messages))
+
+    def test_launch_uses_system_java_fallback_runtime(self):
+        provider = MinecraftProvider()
+        version_dir = paths.provider_versions(provider.id) / "1.20.6"
+        version_dir.mkdir(parents=True, exist_ok=True)
+        (version_dir / "natives").mkdir()
+        (version_dir / "1.20.6.jar").write_bytes(b"jar")
+
+        lib = paths.provider_libraries(provider.id) / "lib/example.jar"
+        lib.parent.mkdir(parents=True, exist_ok=True)
+        lib.write_bytes(b"lib")
+
+        meta = {
+            "id": "1.20.6",
+            "mainClass": "net.minecraft.client.main.Main",
+            "javaVersion": {"component": "java-runtime-epsilon"},
+            "assetIndex": {"id": "17"},
+            "_gameos": {"runtime_component": "system-java"},
+            "libraries": [
+                {"name": "example", "downloads": {"artifact": {"path": "lib/example.jar"}}}
+            ],
+            "arguments": {
+                "jvm": ["-cp", "${classpath}"],
+                "game": ["--username", "${auth_player_name}", "--gameDir", "${game_directory}"],
+            },
+        }
+        (version_dir / "version.json").write_text(json.dumps(meta))
+
+        selection = LaunchSelection(provider=provider.id, username="_local", version="1.20.6", profile="builder")
+
+        with (
+            mock.patch("factorios_launcher.providers.minecraft.subprocess.Popen") as popen,
+            mock.patch("factorios_launcher.providers.minecraft.shutil.which", return_value="/usr/bin/java"),
+            mock.patch("pathlib.Path.is_file", autospec=True, side_effect=lambda path: str(path) in {"/usr/bin/java", str(version_dir / "version.json"), str(version_dir / "1.20.6.jar"), str(lib)}),
+        ):
+            popen.return_value = mock.Mock()
+            provider.launch(selection)
+
+        args = popen.call_args.args[0]
+        self.assertEqual(args[0], "/usr/bin/java")
+
     def test_launch_builds_expected_arguments_and_updates_instance_metadata(self):
         provider = MinecraftProvider()
         version_dir = paths.provider_versions(provider.id) / "1.20.6"

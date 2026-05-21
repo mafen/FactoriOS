@@ -26,6 +26,7 @@ depends=(
     'libxss'
     'libxtst'
     'nss'
+    'jre21-openjdk'
     'xorg-xwayland'
     # The greeter's Updates… button shells out to `sudo pacman` via a
     # sudoers.d rule shipped by this package. `base` doesn't pull sudo.
