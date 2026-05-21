@@ -88,6 +88,44 @@ This does **not** boot the ISO graphically or prove Minecraft launches.
 - The UI titlebar / card layout were fixed, but real VM validation is still
   worth doing after bigger UI changes
 
+## NixOS Ideas
+
+If you revisit the base distro choice later, these are the most promising
+GameOS-shaped NixOS directions:
+
+- Replace the Arch installer + pacstrap path with a NixOS image build
+  approach:
+  use `nixos-generators` or a custom ISO config to produce the live/install
+  image declaratively instead of assembling packages + local pacman repo.
+
+- Model the kiosk session as a NixOS module:
+  one module for the `gameos` user, `labwc`, seat permissions, `gameos.service`,
+  tmpfiles, and the greeter package. That would make the whole appliance
+  reproducible from one config tree.
+
+- Package the launcher/greeter as Nix derivations:
+  either simple Python application derivations or a flake output that builds
+  `gameos-launcher`, `gameos-greeter`, and the system package set together.
+
+- Keep Minecraft mutable data outside the Nix store:
+  `/var/lib/gameos` still makes sense on NixOS because downloaded runtimes,
+  assets, worlds, and provider state are mutable and should not live in the
+  store.
+
+- Let NixOS own the system Java fallback story if desired:
+  even if Mojang-managed runtime download remains the default, NixOS would make
+  it easy to expose a declarative fallback JRE/JDK package for debugging or
+  emergency recovery.
+
+- Convert the current systemd/tmfiles/sysusers glue into NixOS options:
+  the current `systemd/` files are already close to what a NixOS module would
+  express, which makes this one of the easier parts to migrate.
+
+- Start with a dev or VM target first, not a full migration:
+  the safest path would be to create a NixOS VM target that boots directly into
+  the existing greeter, prove the session model works, and only then consider
+  replacing the Arch ISO/install flow fully.
+
 ## If Something Breaks
 
 - Installer/package trust issue:
