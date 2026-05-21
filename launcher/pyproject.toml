@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "factorios-launcher"
 version = "0.1.0"
-description = "factorio.com auth, downloads, and version/profile management for FactoriOS"
+description = "Shared game-appliance launcher library for FactoriOS"
 requires-python = ">=3.11"
 dependencies = ["requests>=2.31"]
 

@@ -2,7 +2,7 @@
 pkgname=factorios-launcher
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="factorio.com auth, downloads, and version/profile management for FactoriOS"
+pkgdesc="Shared game launcher library for FactoriOS"
 arch=('any')
 url="https://example.invalid/factorios"
 license=('MIT')
@@ -30,4 +30,5 @@ package() {
     install -d -m 0755 "$pkgdir/var/lib/factorios"
     install -d -m 0755 "$pkgdir/var/lib/factorios/versions"
     install -d -m 0755 "$pkgdir/var/lib/factorios/users"
+    install -d -m 0755 "$pkgdir/var/lib/factorios/providers"
 }

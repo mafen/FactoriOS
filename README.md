@@ -1,15 +1,16 @@
 # FactoriOS
 
-A joke Linux distribution whose only purpose is playing Factorio.
+A joke Linux distribution whose only purpose is booting straight into games.
 
-Boot → GUI login with your factorio.com credentials → pick a Factorio version and a profile → play. There is nothing else.
+Today that means a shared kiosk shell with a logged-in Factorio path and a
+local Minecraft path.
 
 ## Status
 
 Early scaffolding. Working pieces:
 
-- Launcher library — factorio.com auth (CSRF + session), version download/install, profile management.
-- GTK4 greeter — login + version/profile chooser, opt-in Remember Me.
+- Launcher library — provider-based game management, factorio.com auth, Factorio downloads, Minecraft manifests/runtime handling, profile management.
+- GTK4 greeter — Factorio login, local Minecraft entry, provider-aware version/profile chooser, opt-in Remember Me for Factorio.
 - archiso profile — boots into the installer.
 - Shell installer — partitions disk and installs the system.
 
@@ -19,8 +20,8 @@ Early scaffolding. Working pieces:
 build.sh     top-level orchestrator: builds packages, stages the local repo, builds the ISO
 iso/         archiso profile that produces the installer ISO
 installer/   shell script that runs in the live env to install onto disk
-launcher/    Python library: factorio.com auth, downloads, version/profile management
-greeter/     GTK4 Python app: login screen + version/profile chooser
+launcher/    Python library: shared provider model, auth, downloads, version/profile management
+greeter/     GTK4 Python app: login screen + provider-aware version/profile chooser
 packages/    PKGBUILDs for launcher, greeter, and a factorios-base meta-package
 systemd/     factorios.service + supporting config
 ```

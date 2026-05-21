@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "factorios-greeter"
 version = "0.1.0"
-description = "GTK4 login + version/profile chooser for FactoriOS"
+description = "GTK4 multi-game kiosk greeter for FactoriOS"
 requires-python = ">=3.11"
 dependencies = [
     "factorios-launcher",
