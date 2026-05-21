@@ -1,15 +1,28 @@
-"""Single source of truth for FactoriOS on-disk layout and build identifiers."""
+"""Single source of truth for FactoriOS on-disk layout.
 
+The original appliance only knew about Factorio, so several helpers below
+remain Factorio-shaped for compatibility. New code should prefer the
+provider-oriented helpers near the top of the file.
+"""
+
+import json
 from pathlib import Path
 
 ROOT = Path("/var/lib/factorios")
 VERSIONS = ROOT / "versions"
 USERS = ROOT / "users"
 LAST_USER = ROOT / "last-user"
+PROVIDERS = ROOT / "providers"
+PROVIDER_CONFIG = ROOT / "providers.json"
+
+PROVIDER_FACTORIO = "factorio"
+PROVIDER_MINECRAFT = "minecraft"
+ALL_PROVIDERS = (PROVIDER_FACTORIO, PROVIDER_MINECRAFT)
 
 # Reserved names for the guest/demo flow. factorio.com usernames are
 # alphanumeric, so a leading underscore can never collide with a real one.
 GUEST_USER = "_guest"
+LOCAL_USER = "_local"
 DEMO_VERSION = "_demo"
 
 # Build identifiers. The user-facing names (vanilla, space-age) map to
@@ -27,6 +40,54 @@ BUILD_API = {
     BUILD_SPACE_AGE: "expansion",
 }
 DEFAULT_BUILD = BUILD_SPACE_AGE  # used when the user owns both
+
+
+def provider_root(provider: str) -> Path:
+    return PROVIDERS / provider
+
+
+def provider_versions(provider: str) -> Path:
+    return provider_root(provider) / "versions"
+
+
+def provider_assets(provider: str) -> Path:
+    return provider_root(provider) / "assets"
+
+
+def provider_libraries(provider: str) -> Path:
+    return provider_root(provider) / "libraries"
+
+
+def provider_runtimes(provider: str) -> Path:
+    return provider_root(provider) / "runtimes"
+
+
+def provider_state(provider: str) -> Path:
+    return provider_root(provider) / "state"
+
+
+def enabled_providers() -> tuple[str, ...]:
+    try:
+        data = json.loads(PROVIDER_CONFIG.read_text())
+    except (OSError, json.JSONDecodeError):
+        return ALL_PROVIDERS
+    if isinstance(data, list):
+        providers = [item for item in data if item in ALL_PROVIDERS]
+        if providers:
+            return tuple(providers)
+    return ALL_PROVIDERS
+
+
+def user_provider_dir(username: str, provider: str) -> Path:
+    return user_dir(username) / provider
+
+
+def user_provider_profiles(username: str, provider: str) -> Path:
+    return user_provider_dir(username, provider) / "profiles"
+
+
+def user_provider_profile(username: str, provider: str, profile: str) -> Path:
+    return user_provider_profiles(username, provider) / profile
 
 
 # --- users / sessions / profiles --------------------------------------

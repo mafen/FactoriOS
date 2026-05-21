@@ -1,6 +1,8 @@
 # factorios-launcher
 
-Pure-Python library + small CLI for factorio.com auth, downloads, and managing installed Factorio versions and per-user profiles. No UI, no GTK.
+Pure-Python library + small CLI for FactoriOS' game providers. Today that
+means factorio.com auth/downloads plus local Minecraft install/runtime
+management. No UI, no GTK.
 
 The greeter depends on this; future tooling (headless server provisioning, scripted reinstalls, etc.) should too.
 
@@ -11,14 +13,17 @@ The greeter depends on this; future tooling (headless server provisioning, scrip
 - `versions` — install/list/remove versions under `/var/lib/factorios/versions/`.
 - `profiles` — per-user profile directories, `launch()` to spawn Factorio with `--write-data` pointed at a profile.
 - `paths` — the single source of truth for on-disk layout. Don't hard-code paths elsewhere.
+- `providers/` — provider registry plus `factorio` and `minecraft` adapters used by the greeter.
 
 ## CLI
 
-```
-factorios-launcher releases                  # public latest-releases JSON
-factorios-launcher login <username>          # prompts password, caches session
-factorios-launcher install <user> <version>  # e.g. 1.1.110 or latest
-factorios-launcher list                      # installed versions
+```bash
+factorios-launcher releases factorio
+factorios-launcher releases minecraft
+factorios-launcher login <username>
+factorios-launcher install factorio <user> <version> space-age
+factorios-launcher install minecraft _local 1.20.6
+factorios-launcher list minecraft
 ```
 
 In development without install:

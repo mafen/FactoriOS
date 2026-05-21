@@ -1,9 +1,4 @@
-"""Build + version + profile chooser. Launches Factorio and waits for exit.
-
-Layout: if the signed-in user owns Space Age, a Build dropdown is shown
-above the version/profile selectors and controls what they list. If they
-own only Vanilla, the Build row is hidden and the build is fixed to vanilla.
-"""
+"""Provider-aware chooser for installed games and profiles."""
 
 from __future__ import annotations
 
@@ -15,63 +10,71 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from factorios_launcher import paths, profiles, versions
-from factorios_launcher.auth import Session
-from factorios_launcher.download import ProgressStats, is_newer, latest_releases
+from factorios_launcher import LaunchSelection, get_provider, paths
+from factorios_launcher.download import ProgressStats, parse_version
+from factorios_launcher.providers import all_providers
 
 from . import power, updates, worker
+from .context import UserContext
 
 
 class ChooserScreen(Gtk.Box):
-    """Pick a build + version + profile and launch Factorio.
-
-    `on_switch_user` is called when the user wants to log out.
-    """
-
-    def __init__(self, session: Session, on_switch_user: Callable[[], None]) -> None:
+    def __init__(self, context: UserContext, on_switch_user: Callable[[], None]) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.set_margin_top(40)
         self.set_margin_bottom(40)
         self.set_margin_start(80)
         self.set_margin_end(80)
-        self.session = session
+        self.context = context
         self._on_switch_user = on_switch_user
-
-        # Last-launched (build, version, profile) — used to pre-select the
-        # combos on startup so a reboot resumes where the user left off.
-        # Loaded once; refresh methods consult it when populating models.
         self._last_launch = self._load_last_launch()
+        self._release_cache: dict[tuple[str, str | None], list] = {}
 
-        # Default build = remembered build (if owned), else Space Age if
-        # owned, else Vanilla.
-        remembered_build = (self._last_launch or {}).get("build")
-        if remembered_build in (paths.BUILD_SPACE_AGE, paths.BUILD_VANILLA) and (
-            session.has_space_age or remembered_build == paths.BUILD_VANILLA
-        ):
-            self._build = remembered_build
+        self._provider_ids = [
+            provider.id
+            for provider in all_providers()
+            if not provider.requires_auth or context.has_factorio_auth
+        ]
+        remembered_provider = (self._last_launch or {}).get("provider")
+        if remembered_provider in self._provider_ids:
+            self._provider_id = remembered_provider
+        elif context.has_factorio_auth:
+            self._provider_id = paths.PROVIDER_FACTORIO
         else:
-            self._build = paths.DEFAULT_BUILD if session.has_space_age else paths.BUILD_VANILLA
+            self._provider_id = paths.PROVIDER_MINECRAFT
+        self._provider = get_provider(self._provider_id)
 
-        header = Gtk.Label(label=f"Signed in as {session.username}")
-        header.add_css_class("title-2")
-        self.append(header)
+        remembered_variant = (self._last_launch or {}).get("variant")
+        self._variant = self._default_variant()
+        if remembered_variant in self._provider.available_variants(self.context.factorio_session):
+            self._variant = remembered_variant
 
-        # --- Build row (hidden if user only owns Vanilla) ----------------
-        self.build_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.build_row.append(Gtk.Label(label="Build", xalign=0))
-        # Always include both labels in display order Space Age, Vanilla so
-        # the default selection (Space Age) is index 0 when shown.
-        build_labels = [paths.BUILD_DISPLAY[b] for b in (paths.BUILD_SPACE_AGE, paths.BUILD_VANILLA)]
-        self._build_order = (paths.BUILD_SPACE_AGE, paths.BUILD_VANILLA)
-        self.build_combo = Gtk.DropDown.new_from_strings(build_labels)
-        if self._build in self._build_order:
-            self.build_combo.set_selected(self._build_order.index(self._build))
-        self.build_combo.connect("notify::selected", self._on_build_changed)
-        self.build_row.append(self.build_combo)
-        self.append(self.build_row)
-        self.build_row.set_visible(session.has_space_age)
+        title = Gtk.Label(label="FactoriOS")
+        title.add_css_class("title-1")
+        self.append(title)
 
-        # --- Version row -------------------------------------------------
+        subtitle = Gtk.Label(label=self._subtitle(), xalign=0)
+        subtitle.add_css_class("dim-label")
+        self.header_label = subtitle
+        self.append(subtitle)
+
+        self.provider_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.provider_row.append(Gtk.Label(label="Game", xalign=0))
+        self.provider_combo = Gtk.DropDown.new_from_strings([get_provider(pid).name for pid in self._provider_ids])
+        self.provider_combo.set_selected(self._provider_ids.index(self._provider_id))
+        self.provider_combo.connect("notify::selected", self._on_provider_changed)
+        self.provider_row.append(self.provider_combo)
+        self.provider_row.set_visible(len(self._provider_ids) > 1)
+        self.append(self.provider_row)
+
+        self.variant_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.variant_label = Gtk.Label(label="Build", xalign=0)
+        self.variant_row.append(self.variant_label)
+        self.variant_combo = Gtk.DropDown.new_from_strings([])
+        self.variant_combo.connect("notify::selected", self._on_variant_changed)
+        self.variant_row.append(self.variant_combo)
+        self.append(self.variant_row)
+
         self.append(Gtk.Label(label="Version", xalign=0))
         version_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.version_combo = Gtk.DropDown.new_from_strings([])
@@ -85,15 +88,11 @@ class ChooserScreen(Gtk.Box):
         version_row.append(self.delete_version_button)
         self.append(version_row)
 
-        # Per-build cache of (stable, experimental) from latest-releases,
-        # populated lazily by _refresh_update_hint. {} = not fetched yet.
-        self._releases: dict[str, tuple[str | None, str | None]] = {}
         self.update_hint = Gtk.Label(label="", xalign=0)
         self.update_hint.add_css_class("dim-label")
         self.update_hint.set_visible(False)
         self.append(self.update_hint)
 
-        # --- Profile row -------------------------------------------------
         self.append(Gtk.Label(label="Profile", xalign=0))
         profile_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.profile_combo = Gtk.DropDown.new_from_strings([])
@@ -107,8 +106,7 @@ class ChooserScreen(Gtk.Box):
         profile_row.append(self.delete_profile_button)
         self.append(profile_row)
 
-        # --- Status + progress ------------------------------------------
-        self.status = Gtk.Label(label="")
+        self.status = Gtk.Label(label="", xalign=0)
         self.status.add_css_class("dim-label")
         self.append(self.status)
 
@@ -117,16 +115,9 @@ class ChooserScreen(Gtk.Box):
         self.progress.set_visible(False)
         self.append(self.progress)
 
-        # --- Actions -----------------------------------------------------
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_halign(Gtk.Align.END)
-        # mimalloc preload toggle. Default on; remembered per-user in
-        # last-launch.json alongside build/version/profile. Untick to A/B
-        # against glibc's allocator without rebuilding.
-        self.mimalloc_check = Gtk.CheckButton.new_with_label("Use mimalloc (faster)")
-        self.mimalloc_check.set_tooltip_text(
-            "Preload libmimalloc into Factorio for better late-game UPS"
-        )
+        self.mimalloc_check = Gtk.CheckButton.new_with_label("Use mimalloc (Factorio only)")
         remembered_mimalloc = (self._last_launch or {}).get("use_mimalloc", True)
         self.mimalloc_check.set_active(bool(remembered_mimalloc))
         actions.append(self.mimalloc_check)
@@ -139,120 +130,61 @@ class ChooserScreen(Gtk.Box):
         actions.append(self.launch_button)
         self.append(actions)
 
-        # --- Footer: forget-me + updates + power controls ----------------
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        forget = Gtk.Button(label="Forget me")
-        forget.add_css_class("flat")
-        forget.set_tooltip_text("Delete the cached factorio.com session and return to sign-in")
-        forget.connect("clicked", self._on_forget_me)
-        footer.append(forget)
+        self.forget_button = Gtk.Button(label="Forget me")
+        self.forget_button.add_css_class("flat")
+        self.forget_button.connect("clicked", self._on_forget_me)
+        footer.append(self.forget_button)
         updates_btn = Gtk.Button(label="Updates…")
         updates_btn.add_css_class("flat")
-        updates_btn.set_tooltip_text("Check for and install Arch + FactoriOS package updates")
         updates_btn.connect("clicked", lambda *_: updates.show_dialog(self))
         footer.append(updates_btn)
-        spacer = Gtk.Box(hexpand=True)
-        footer.append(spacer)
+        footer.append(Gtk.Box(hexpand=True))
         footer.append(power.make_row())
         self.append(footer)
 
-        self._refresh_versions()
-        self._refresh_profiles()
-        self._refresh_update_hint()
+        self._refresh_all()
 
-    # --- helpers ---------------------------------------------------------
+    def _subtitle(self) -> str:
+        if self.context.has_factorio_auth:
+            return f"Signed in as {self.context.username}"
+        return "Local Minecraft profile"
 
-    def _on_build_changed(self, *_args) -> None:
-        idx = self.build_combo.get_selected()
-        if 0 <= idx < len(self._build_order):
-            self._build = self._build_order[idx]
-            self._refresh_versions()
-            self._refresh_profiles()
-            self._refresh_update_hint()
-
-    def _preselect(self, combo: Gtk.DropDown, items: list[str], wanted: str | None) -> None:
-        if wanted is not None and wanted in items:
-            combo.set_selected(items.index(wanted))
-
-    def _remembered_for_current_build(self, key: str) -> str | None:
-        """Return the saved version/profile only if it was recorded against
-        the build that's currently selected — otherwise the pre-selection
-        bias should not carry across builds."""
-        if not self._last_launch or self._last_launch.get("build") != self._build:
+    def _remembered(self, key: str):
+        if not self._last_launch:
+            return None
+        if self._last_launch.get("provider") != self._provider_id:
+            return None
+        if self._last_launch.get("variant") != self._variant:
             return None
         return self._last_launch.get(key)
 
-    def _refresh_versions(self) -> None:
-        installed = versions.list_installed_for_build(self._build)
-        items = installed or ["(none installed)"]
-        self.version_combo.set_model(Gtk.StringList.new(items))
-        if installed:
-            self._preselect(self.version_combo, installed, self._remembered_for_current_build("version"))
-        self.launch_button.set_sensitive(bool(installed))
-        self.delete_version_button.set_sensitive(bool(installed))
+    def _load_last_launch(self) -> dict | None:
+        path = paths.user_last_launch(self.context.username)
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
 
-    def _refresh_update_hint(self) -> None:
-        """Compare latest stable for the current build against the newest
-        installed version and show a hint when there's an upgrade
-        available. Lazy-fetches latest-releases on first request per build
-        and caches per-session; the launch handler evicts the cache for
-        the build that just ran when Factorio exits, so the post-play
-        refresh always re-fetches."""
-        build = self._build
-        cached = self._releases.get(build)
-
-        def render(stable: str | None, experimental: str | None) -> None:
-            installed = versions.list_installed_for_build(build)
-            newest = max(installed, key=lambda v: tuple(int(x) for x in v.split(".") if x.isdigit()), default=None) if installed else None
-            parts: list[str] = []
-            if stable and (newest is None or is_newer(stable, newest)):
-                if newest is None:
-                    parts.append(f"Latest stable: {stable}")
-                else:
-                    parts.append(f"Update available: {stable} (you have {newest})")
-            if experimental and is_newer(experimental, stable or "") and (newest is None or is_newer(experimental, newest)):
-                parts.append(f"experimental: {experimental}")
-            text = " · ".join(parts)
-            self.update_hint.set_label(text)
-            self.update_hint.set_visible(bool(text))
-
-        if cached is not None:
-            render(*cached)
-            return
-
-        # Not fetched yet — hide hint and fetch in the background.
-        self.update_hint.set_visible(False)
-
-        def fetch():
-            releases = latest_releases(self.session)
-            api = paths.BUILD_API[build]
-            return (
-                releases.get("stable", {}).get(api),
-                releases.get("experimental", {}).get(api),
-            )
-
-        def done(result):
-            self._releases[build] = result
-            # User may have switched build between fetch start and now; only
-            # render if the current build still matches the fetched one.
-            if self._build == build:
-                render(*result)
-
-        def failed(_exc):
-            # Silently swallow — an update hint isn't important enough to
-            # surface a network error in the status line.
+    def _save_last_launch(self, version: str, profile: str) -> None:
+        record = {
+            "provider": self._provider_id,
+            "variant": self._variant,
+            "version": version,
+            "profile": profile,
+            "use_mimalloc": self.mimalloc_check.get_active(),
+        }
+        path = paths.user_last_launch(self.context.username)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(record))
+        except OSError:
             pass
+        self._last_launch = record
 
-        worker.run(fetch, on_done=done, on_error=failed)
-
-    def _refresh_profiles(self) -> None:
-        on_disk = profiles.list_profiles(self.session.username, build=self._build)
-        profs = on_disk or [profiles.DEFAULT_PROFILE]
-        self.profile_combo.set_model(Gtk.StringList.new(profs))
-        self._preselect(self.profile_combo, profs, self._remembered_for_current_build("profile"))
-        # Only allow delete when a profile actually exists on disk —
-        # the DEFAULT_PROFILE fallback in the dropdown is a placeholder.
-        self.delete_profile_button.set_sensitive(bool(on_disk))
+    def _default_variant(self) -> str | None:
+        return self._provider.default_variant(self.context.factorio_session)
 
     def _selected(self, combo: Gtk.DropDown) -> str | None:
         model = combo.get_model()
@@ -262,112 +194,167 @@ class ChooserScreen(Gtk.Box):
         item = model.get_item(idx)
         return item.get_string() if item else None
 
-    def _load_last_launch(self) -> dict | None:
-        p = paths.user_last_launch(self.session.username)
-        try:
-            data = json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError):
-            return None
-        return data if isinstance(data, dict) else None
+    def _set_provider(self, provider_id: str) -> None:
+        self._provider_id = provider_id
+        self._provider = get_provider(provider_id)
+        remembered_variant = (self._last_launch or {}).get("variant")
+        variants = self._provider.available_variants(self.context.factorio_session)
+        if remembered_variant in variants:
+            self._variant = remembered_variant
+        else:
+            self._variant = self._provider.default_variant(self.context.factorio_session)
 
-    def _save_last_launch(
-        self, build: str, version: str, profile: str, use_mimalloc: bool,
-    ) -> None:
-        p = paths.user_last_launch(self.session.username)
-        record = {
-            "build": build,
-            "version": version,
-            "profile": profile,
-            "use_mimalloc": use_mimalloc,
-        }
-        try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(record))
-        except OSError:
-            # Not worth surfacing — pre-selection is a convenience, not
-            # load-bearing. Worst case the next boot uses defaults.
-            pass
-        # Keep our in-memory copy in sync so an in-session build flip
-        # still pre-selects this version/profile if the user flips back.
-        self._last_launch = record
+    def _refresh_variants(self) -> None:
+        variants = self._provider.available_variants(self.context.factorio_session)
+        self.variant_label.set_label(self._provider.variant_label or "Variant")
+        self.variant_row.set_visible(bool(variants))
+        if not variants:
+            self.variant_combo.set_model(Gtk.StringList.new([]))
+            return
+        labels = [self._provider.display_variant(v) for v in variants]
+        self.variant_combo.set_model(Gtk.StringList.new(labels))
+        if self._variant in variants:
+            self.variant_combo.set_selected(variants.index(self._variant))
+        else:
+            self._variant = variants[0]
+            self.variant_combo.set_selected(0)
 
-    # --- actions ---------------------------------------------------------
+    def _refresh_versions(self) -> None:
+        installed = self._provider.list_installed(self._variant)
+        items = installed or ["(none installed)"]
+        self.version_combo.set_model(Gtk.StringList.new(items))
+        remembered = self._remembered("version")
+        if remembered and remembered in installed:
+            self.version_combo.set_selected(installed.index(remembered))
+        self.launch_button.set_sensitive(bool(installed))
+        self.delete_version_button.set_sensitive(bool(installed))
 
-    def _on_install_clicked(self, *_args) -> None:
-        """Look up available releases, then show a dialog letting the
-        user pick latest stable, latest experimental (if newer), or any
-        specific version."""
-        build = self._build
-        build_label = paths.BUILD_DISPLAY[build]
-        self.install_button.set_sensitive(False)
-        self.status.set_label(f"Looking up {build_label} releases…")
+    def _refresh_profiles(self) -> None:
+        on_disk = self._provider.list_profiles(self.context.username, self._variant)
+        default_profile = "default"
+        items = on_disk or [default_profile]
+        self.profile_combo.set_model(Gtk.StringList.new(items))
+        remembered = self._remembered("profile")
+        if remembered and remembered in items:
+            self.profile_combo.set_selected(items.index(remembered))
+        self.delete_profile_button.set_sensitive(bool(on_disk))
+
+    def _refresh_update_hint(self) -> None:
+        if self._provider_id != paths.PROVIDER_FACTORIO:
+            self.update_hint.set_visible(False)
+            return
+        key = (self._provider_id, self._variant)
+        cached = self._release_cache.get(key)
+        installed = self._provider.list_installed(self._variant)
+
+        def render(choices):
+            if not choices:
+                self.update_hint.set_visible(False)
+                return
+            newest = max(installed, key=parse_version, default=None)
+            latest = choices[0].version
+            if newest and parse_version(latest) <= parse_version(newest):
+                self.update_hint.set_visible(False)
+                return
+            label = choices[0].label if not newest else f"Update available: {latest} (you have {newest})"
+            self.update_hint.set_label(label)
+            self.update_hint.set_visible(True)
+
+        if cached is not None:
+            render(cached)
+            return
+
+        self.update_hint.set_visible(False)
 
         def fetch():
-            releases = latest_releases(self.session)
-            api = paths.BUILD_API[build]
-            stable = releases.get("stable", {}).get(api)
-            experimental = releases.get("experimental", {}).get(api)
-            return stable, experimental
+            return self._provider.release_choices(self.context.factorio_session, self._variant)
 
-        def show(result):
-            stable, experimental = result
+        def done(choices):
+            self._release_cache[key] = choices
+            if self._provider_id == paths.PROVIDER_FACTORIO:
+                render(choices)
+
+        worker.run(fetch, on_done=done, on_error=lambda _exc: None)
+
+    def _refresh_all(self) -> None:
+        self.header_label.set_label(self._subtitle())
+        self.forget_button.set_visible(self.context.has_factorio_auth)
+        self.mimalloc_check.set_sensitive(self._provider_id == paths.PROVIDER_FACTORIO)
+        self._refresh_variants()
+        self._refresh_versions()
+        self._refresh_profiles()
+        self._refresh_update_hint()
+
+    def _on_provider_changed(self, *_args) -> None:
+        idx = self.provider_combo.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION:
+            return
+        self._set_provider(self._provider_ids[idx])
+        self.status.set_label("")
+        self._refresh_all()
+
+    def _on_variant_changed(self, *_args) -> None:
+        variants = self._provider.available_variants(self.context.factorio_session)
+        idx = self.variant_combo.get_selected()
+        if not variants or idx == Gtk.INVALID_LIST_POSITION or idx >= len(variants):
+            return
+        self._variant = variants[idx]
+        self.status.set_label("")
+        self._refresh_versions()
+        self._refresh_profiles()
+        self._refresh_update_hint()
+
+    def _on_install_clicked(self, *_args) -> None:
+        self.install_button.set_sensitive(False)
+        self.status.set_label(f"Looking up {self._provider.name} releases…")
+
+        def fetch():
+            return self._provider.release_choices(self.context.factorio_session, self._variant)
+
+        def done(choices):
             self.install_button.set_sensitive(True)
             self.status.set_label("")
-            self._show_install_dialog(stable, experimental)
+            self._show_install_dialog(choices)
 
         def failed(exc):
             self.install_button.set_sensitive(True)
             self.status.set_label(f"Lookup failed: {exc}")
 
-        worker.run(fetch, on_done=show, on_error=failed)
+        worker.run(fetch, on_done=done, on_error=failed)
 
-    def _show_install_dialog(self, stable: str | None, experimental: str | None) -> None:
-        dialog = Gtk.Window(
-            title=f"Install {paths.BUILD_DISPLAY[self._build]}",
-            transient_for=self.get_root(),
-            modal=True,
-        )
+    def _show_install_dialog(self, choices) -> None:
+        dialog = Gtk.Window(title=f"Install {self._provider.name}", transient_for=self.get_root(), modal=True)
         box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=8,
             margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
         )
 
-        stable_btn: Gtk.CheckButton | None = None
-        exp_btn: Gtk.CheckButton | None = None
-
-        if stable:
-            stable_btn = Gtk.CheckButton.new_with_label(f"Latest stable ({stable})")
-            stable_btn.set_active(True)
-            box.append(stable_btn)
-
-        # Only show experimental if it's actually newer than stable —
-        # otherwise it's the same thing under another name.
-        if experimental and (not stable or is_newer(experimental, stable)):
-            exp_btn = Gtk.CheckButton.new_with_label(f"Latest experimental ({experimental})")
-            if stable_btn is not None:
-                exp_btn.set_group(stable_btn)
+        radio_head = None
+        radios = []
+        for choice in choices:
+            btn = Gtk.CheckButton.new_with_label(choice.label)
+            if radio_head is None:
+                radio_head = btn
+                btn.set_active(True)
             else:
-                exp_btn.set_active(True)
-            box.append(exp_btn)
+                btn.set_group(radio_head)
+            radios.append((btn, choice.version))
+            box.append(btn)
 
         custom_btn = Gtk.CheckButton.new_with_label("Specific version:")
-        if stable_btn is not None:
-            custom_btn.set_group(stable_btn)
-        elif exp_btn is not None:
-            custom_btn.set_group(exp_btn)
+        if radio_head is not None:
+            custom_btn.set_group(radio_head)
         else:
             custom_btn.set_active(True)
         box.append(custom_btn)
 
-        version_entry = Gtk.Entry(placeholder_text="e.g. 1.1.110")
-        version_entry.set_margin_start(24)
-        # Auto-select the radio when the user types into the entry.
-        version_entry.connect("changed", lambda *_: custom_btn.set_active(True))
-        box.append(version_entry)
+        entry = Gtk.Entry(placeholder_text="e.g. 1.20.6")
+        entry.set_margin_start(24)
+        entry.connect("changed", lambda *_: custom_btn.set_active(True))
+        box.append(entry)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_halign(Gtk.Align.END)
-        actions.set_margin_top(8)
         cancel = Gtk.Button(label="Cancel")
         cancel.connect("clicked", lambda *_: dialog.close())
         actions.append(cancel)
@@ -376,173 +363,28 @@ class ChooserScreen(Gtk.Box):
         actions.append(install)
         box.append(actions)
 
-        def on_install(*_):
-            if stable_btn is not None and stable_btn.get_active():
-                version = stable
-            elif exp_btn is not None and exp_btn.get_active():
-                version = experimental
-            else:
-                version = version_entry.get_text().strip()
-            if not version:
-                return
-            dialog.close()
-            self._do_install(version)
+        def on_install(*_args) -> None:
+            for btn, version in radios:
+                if btn.get_active():
+                    dialog.close()
+                    self._do_install(version)
+                    return
+            version = entry.get_text().strip()
+            if version:
+                dialog.close()
+                self._do_install(version)
 
         install.connect("clicked", on_install)
-        version_entry.connect("activate", on_install)
-        dialog.set_child(box)
-        dialog.present()
-
-    def _on_forget_me(self, *_args) -> None:
-        """Delete the cached session and last-user pointer for this user,
-        then drop back to the sign-in screen."""
-        dialog = Gtk.Window(
-            title="Forget me", transient_for=self.get_root(), modal=True,
-        )
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=12,
-            margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
-        )
-        box.append(Gtk.Label(
-            label=(
-                f"Forget {self.session.username}?\n\n"
-                "The cached factorio.com session is deleted and Remember "
-                "Me is cleared. Your installed versions, profiles, and "
-                "saves are kept."
-            ),
-            wrap=True,
-            xalign=0,
-        ))
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions.set_halign(Gtk.Align.END)
-        cancel = Gtk.Button(label="Cancel")
-        cancel.connect("clicked", lambda *_: dialog.close())
-        actions.append(cancel)
-        confirm = Gtk.Button(label="Forget me")
-        confirm.add_css_class("destructive-action")
-
-        def go(*_):
-            dialog.close()
-            sess_path = paths.user_session(self.session.username)
-            if sess_path.exists():
-                try:
-                    sess_path.unlink()
-                except OSError:
-                    pass
-            if paths.LAST_USER.exists():
-                try:
-                    if paths.LAST_USER.read_text().strip() == self.session.username:
-                        paths.LAST_USER.unlink()
-                except OSError:
-                    pass
-            self._on_switch_user()
-
-        confirm.connect("clicked", go)
-        actions.append(confirm)
-        box.append(actions)
-        dialog.set_child(box)
-        dialog.present()
-
-    def _on_delete_profile(self, *_args) -> None:
-        profile = self._selected(self.profile_combo)
-        if not profile:
-            return
-        build = self._build
-        build_label = paths.BUILD_DISPLAY[build]
-
-        dialog = Gtk.Window(
-            title="Delete profile",
-            transient_for=self.get_root(),
-            modal=True,
-        )
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=12,
-            margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
-        )
-        msg = Gtk.Label(
-            label=f"Delete the “{profile}” {build_label} profile?\n\n"
-                  "This removes the profile's mods directory. Saves and "
-                  "config live at ~/.factorio and are not affected."
-        )
-        msg.set_wrap(True)
-        msg.set_xalign(0)
-        box.append(msg)
-
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions.set_halign(Gtk.Align.END)
-        cancel = Gtk.Button(label="Cancel")
-        cancel.connect("clicked", lambda *_: dialog.close())
-        actions.append(cancel)
-        confirm = Gtk.Button(label="Delete")
-        confirm.add_css_class("destructive-action")
-
-        def on_confirm(*_):
-            dialog.close()
-            try:
-                profiles.remove(self.session.username, profile, build=build)
-                self.status.set_label(f"Deleted profile “{profile}”.")
-            except OSError as e:
-                self.status.set_label(f"Delete failed: {e}")
-            self._refresh_profiles()
-
-        confirm.connect("clicked", on_confirm)
-        actions.append(confirm)
-        box.append(actions)
-        dialog.set_child(box)
-        dialog.present()
-
-    def _on_delete_version(self, *_args) -> None:
-        version = self._selected(self.version_combo)
-        if not version or version == "(none installed)":
-            return
-        build = self._build
-        build_label = paths.BUILD_DISPLAY[build]
-
-        dialog = Gtk.Window(
-            title="Delete version",
-            transient_for=self.get_root(),
-            modal=True,
-        )
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=12,
-            margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
-        )
-        msg = Gtk.Label(label=f"Remove {build_label} {version}?\n\nSaves and mods are kept; only the game files are deleted.")
-        msg.set_wrap(True)
-        msg.set_xalign(0)
-        box.append(msg)
-
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions.set_halign(Gtk.Align.END)
-        cancel = Gtk.Button(label="Cancel")
-        cancel.connect("clicked", lambda *_: dialog.close())
-        actions.append(cancel)
-        confirm = Gtk.Button(label="Delete")
-        confirm.add_css_class("destructive-action")
-
-        def on_confirm(*_):
-            dialog.close()
-            try:
-                versions.remove(version, build)
-                self.status.set_label(f"Removed {build_label} {version}.")
-            except OSError as e:
-                self.status.set_label(f"Delete failed: {e}")
-            self._refresh_versions()
-
-        confirm.connect("clicked", on_confirm)
-        actions.append(confirm)
-        box.append(actions)
+        entry.connect("activate", on_install)
         dialog.set_child(box)
         dialog.present()
 
     def _do_install(self, version: str) -> None:
-        build = self._build
-        build_label = paths.BUILD_DISPLAY[build]
-        self.install_button.set_sensitive(False)
-        self.status.set_label(f"Installing {build_label} {version}…")
+        self.status.set_label(f"Installing {self._provider.name} {version}…")
         self.progress.set_visible(True)
         self.progress.set_fraction(0.0)
         self.progress.set_text("")
+        self.install_button.set_sensitive(False)
 
         stats = ProgressStats()
 
@@ -555,84 +397,212 @@ class ChooserScreen(Gtk.Box):
             stats.update(done, total)
             GLib.idle_add(push)
 
-        def do_install():
-            versions.install(self.session, version, build=build, progress=cb)
-            return version
+        def install():
+            return self._provider.install(
+                self.context.username,
+                version,
+                session=self.context.factorio_session,
+                variant=self._variant,
+                progress=cb,
+            )
 
-        def done(_version):
-            self.install_button.set_sensitive(True)
+        def done(_result):
             self.progress.set_visible(False)
-            self.status.set_label(f"Installed {build_label} {version}.")
+            self.install_button.set_sensitive(True)
+            self.status.set_label(f"Installed {self._provider.name} {version}.")
+            self._release_cache.pop((self._provider_id, self._variant), None)
             self._refresh_versions()
+            self._refresh_profiles()
             self._refresh_update_hint()
 
         def failed(exc):
-            self.install_button.set_sensitive(True)
             self.progress.set_visible(False)
+            self.install_button.set_sensitive(True)
             self.status.set_label(f"Install failed: {exc}")
 
-        worker.run(do_install, on_done=done, on_error=failed)
+        worker.run(install, on_done=done, on_error=failed)
 
     def _on_new_profile(self, *_args) -> None:
         dialog = Gtk.Window(title="New profile", transient_for=self.get_root(), modal=True)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8,
+            margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
+        )
+        box.append(Gtk.Label(label=f"Create a new {self._provider.name} profile", xalign=0))
         entry = Gtk.Entry(placeholder_text="Profile name")
         box.append(entry)
-        confirm = Gtk.Button(label="Create")
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_halign(Gtk.Align.END)
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda *_: dialog.close())
+        actions.append(cancel)
+        create = Gtk.Button(label="Create")
+        create.add_css_class("suggested-action")
+        actions.append(create)
+        box.append(actions)
 
-        def on_confirm(*_):
+        def go(*_args):
             name = entry.get_text().strip()
-            if name:
-                profiles.ensure(self.session.username, name, build=self._build)
-                self._refresh_profiles()
+            if not name:
+                return
             dialog.close()
+            try:
+                self._provider.ensure_profile(self.context.username, name, self._variant)
+                self.status.set_label(f"Created profile “{name}”.")
+                self._refresh_profiles()
+            except OSError as exc:
+                self.status.set_label(f"Create failed: {exc}")
 
-        confirm.connect("clicked", on_confirm)
-        entry.connect("activate", on_confirm)
-        box.append(confirm)
+        create.connect("clicked", go)
+        entry.connect("activate", go)
+        dialog.set_child(box)
+        dialog.present()
+
+    def _on_delete_profile(self, *_args) -> None:
+        profile = self._selected(self.profile_combo)
+        if not profile:
+            return
+        dialog = Gtk.Window(title="Delete profile", transient_for=self.get_root(), modal=True)
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=12,
+            margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
+        )
+        box.append(Gtk.Label(
+            label=f"Delete the “{profile}” {self._provider.name} profile?\n\nThis removes that profile's saves, settings, and local state.",
+            wrap=True,
+            xalign=0,
+        ))
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_halign(Gtk.Align.END)
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda *_: dialog.close())
+        actions.append(cancel)
+        confirm = Gtk.Button(label="Delete")
+        confirm.add_css_class("destructive-action")
+
+        def go(*_args):
+            dialog.close()
+            try:
+                self._provider.delete_profile(self.context.username, profile, self._variant)
+                self.status.set_label(f"Deleted profile “{profile}”.")
+                self._refresh_profiles()
+            except OSError as exc:
+                self.status.set_label(f"Delete failed: {exc}")
+
+        confirm.connect("clicked", go)
+        actions.append(confirm)
+        box.append(actions)
+        dialog.set_child(box)
+        dialog.present()
+
+    def _on_delete_version(self, *_args) -> None:
+        version = self._selected(self.version_combo)
+        if not version or version == "(none installed)":
+            return
+        dialog = Gtk.Window(title="Delete version", transient_for=self.get_root(), modal=True)
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=12,
+            margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
+        )
+        box.append(Gtk.Label(
+            label=f"Remove {self._provider.name} {version}?\n\nProfiles are kept; only the installed game files are deleted.",
+            wrap=True,
+            xalign=0,
+        ))
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_halign(Gtk.Align.END)
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda *_: dialog.close())
+        actions.append(cancel)
+        confirm = Gtk.Button(label="Delete")
+        confirm.add_css_class("destructive-action")
+
+        def go(*_args):
+            dialog.close()
+            try:
+                self._provider.delete_version(version, self._variant)
+                self.status.set_label(f"Deleted {self._provider.name} {version}.")
+                self._refresh_versions()
+            except OSError as exc:
+                self.status.set_label(f"Delete failed: {exc}")
+
+        confirm.connect("clicked", go)
+        actions.append(confirm)
+        box.append(actions)
+        dialog.set_child(box)
+        dialog.present()
+
+    def _on_forget_me(self, *_args) -> None:
+        if not self.context.has_factorio_auth:
+            return
+        dialog = Gtk.Window(title="Forget me", transient_for=self.get_root(), modal=True)
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=12,
+            margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
+        )
+        box.append(Gtk.Label(
+            label=(
+                f"Forget {self.context.username}?\n\n"
+                "The cached factorio.com session is deleted and Remember Me is cleared."
+            ),
+            wrap=True,
+            xalign=0,
+        ))
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_halign(Gtk.Align.END)
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda *_: dialog.close())
+        actions.append(cancel)
+        confirm = Gtk.Button(label="Forget me")
+        confirm.add_css_class("destructive-action")
+
+        def go(*_args):
+            dialog.close()
+            sess_path = paths.user_session(self.context.username)
+            if sess_path.exists():
+                sess_path.unlink(missing_ok=True)
+            if paths.LAST_USER.exists():
+                try:
+                    if paths.LAST_USER.read_text().strip() == self.context.username:
+                        paths.LAST_USER.unlink()
+                except OSError:
+                    pass
+            self._on_switch_user()
+
+        confirm.connect("clicked", go)
+        actions.append(confirm)
+        box.append(actions)
         dialog.set_child(box)
         dialog.present()
 
     def _on_launch(self, *_args) -> None:
         version = self._selected(self.version_combo)
-        profile = self._selected(self.profile_combo) or profiles.DEFAULT_PROFILE
-        build = self._build
-        use_mimalloc = self.mimalloc_check.get_active()
+        profile = self._selected(self.profile_combo) or "default"
         if not version or version == "(none installed)":
-            self.status.set_label(f"No {paths.BUILD_DISPLAY[build]} version installed. Click 'Install latest' first.")
             return
-        self.status.set_label(f"Launching Factorio {version} ({paths.BUILD_DISPLAY[build]})…")
+        self._provider.ensure_profile(self.context.username, profile, self._variant)
+        self._save_last_launch(version, profile)
         self.launch_button.set_sensitive(False)
-        # Remember the user's choice so a reboot resumes the same triple.
-        # Done synchronously (a tiny JSON write) before the worker thread
-        # starts, so a crash during the run still leaves the record.
-        self._save_last_launch(build, version, profile, use_mimalloc)
+        self.status.set_label(f"Launching {self._provider.name}…")
+
+        selection = LaunchSelection(
+            provider=self._provider_id,
+            username=self.context.username,
+            version=version,
+            profile=profile,
+            variant=self._variant,
+            use_mimalloc=self.mimalloc_check.get_active(),
+        )
 
         def do_launch():
-            vid = paths.version_id(version, build)
-            # Pass the live session so launch() forwards factorio.com
-            # credentials via --service-username/--service-token; the
-            # in-game mod portal then works without a second login.
-            p = profiles.launch(
-                vid, self.session.username, profile,
-                build=build, session=self.session,
-                use_mimalloc=use_mimalloc,
-            )
-            return p.wait()
+            proc = self._provider.launch(selection, session=self.context.factorio_session)
+            return proc.wait()
 
         def done(rc):
             self.launch_button.set_sensitive(True)
-            self.status.set_label(f"Factorio exited (status {rc}).")
-            # In-game updater may have bumped the install during this
-            # session — rename the dir to match the new version before
-            # we re-read the installed list, so the dropdown picks it
-            # up immediately instead of on a later refresh.
-            versions.reconcile_all(build)
-            # factorio.com may also have shipped a new stable while we
-            # played; drop the cached upstream-releases for this build
-            # so the hint re-fetches instead of re-rendering stale data.
-            self._releases.pop(build, None)
+            self.status.set_label(f"{self._provider.name} exited (status {rc}).")
             self._refresh_versions()
+            self._refresh_profiles()
             self._refresh_update_hint()
 
         def failed(exc):

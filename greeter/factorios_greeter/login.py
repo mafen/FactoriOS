@@ -1,4 +1,4 @@
-"""Login screen: factorio.com username + password + Remember Me."""
+"""Login screen: Factorio sign-in plus local Minecraft path."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ class LoginScreen(Gtk.Box):
         self,
         on_success: Callable[[Session, bool], None],
         on_guest: Callable[[], None],
+        on_minecraft: Callable[[], None],
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.set_margin_top(80)
@@ -31,12 +32,13 @@ class LoginScreen(Gtk.Box):
         self.set_margin_end(120)
         self._on_success = on_success
         self._on_guest = on_guest
+        self._on_minecraft = on_minecraft
 
         title = Gtk.Label(label="FactoriOS")
         title.add_css_class("title-1")
         self.append(title)
 
-        subtitle = Gtk.Label(label="Sign in with your factorio.com account")
+        subtitle = Gtk.Label(label="Sign in to Factorio, or launch Minecraft locally")
         subtitle.add_css_class("dim-label")
         self.append(subtitle)
 
@@ -57,6 +59,12 @@ class LoginScreen(Gtk.Box):
         self.button.add_css_class("suggested-action")
         self.button.connect("clicked", self._on_clicked)
         self.append(self.button)
+
+        minecraft = Gtk.Button(label="Play Minecraft")
+        minecraft.add_css_class("flat")
+        minecraft.set_halign(Gtk.Align.CENTER)
+        minecraft.connect("clicked", lambda *_: self._on_minecraft())
+        self.append(minecraft)
 
         # Guest path — downloads and plays the demo, no account needed.
         guest = Gtk.Button(label="Play demo (no account needed)")

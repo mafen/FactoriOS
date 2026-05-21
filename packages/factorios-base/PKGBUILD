@@ -5,7 +5,7 @@
 pkgname=factorios-base
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="FactoriOS system glue: factorios user, systemd unit, kiosk session"
+pkgdesc="FactoriOS system glue for the multi-game kiosk session"
 arch=('any')
 url="https://example.invalid/factorios"
 license=('MIT')
@@ -18,6 +18,16 @@ depends=(
     'vulkan-icd-loader'
     'mimalloc'
     'networkmanager'
+    'alsa-lib'
+    'freetype2'
+    'libxcursor'
+    'libxi'
+    'libxinerama'
+    'libxrandr'
+    'libxss'
+    'libxtst'
+    'nss'
+    'xorg-xwayland'
     # The greeter's Updates… button shells out to `sudo pacman` via a
     # sudoers.d rule shipped by this package. `base` doesn't pull sudo.
     'sudo'

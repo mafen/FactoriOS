@@ -2,7 +2,7 @@
 pkgname=factorios-greeter
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="GTK4 login + version/profile chooser for FactoriOS"
+pkgdesc="GTK4 multi-game greeter for FactoriOS"
 arch=('any')
 url="https://example.invalid/factorios"
 license=('MIT')

@@ -1,11 +1,12 @@
 # factorios-greeter
 
-GTK4 application that *is* the entire user-facing surface of an installed FactoriOS system. labwc execs this; nothing else runs.
+GTK4 application that *is* the entire user-facing surface of an installed
+FactoriOS system. labwc execs this; nothing else runs.
 
 ## Screens
 
-- **Login** — factorio.com username + password, opt-in *Remember Me*. On boot, if Remember Me was set previously, the greeter skips this screen and validates the cached session quietly; fallback to login on expiry.
-- **Chooser** — version dropdown, profile dropdown, *Install latest*, *New profile…*, *Launch*, *Switch user*. *Launch* spawns Factorio and waits — when the game exits, we return to the chooser.
+- **Login** — factorio.com username + password, opt-in *Remember Me*, plus buttons for local Minecraft and the Factorio demo.
+- **Chooser** — game dropdown (when multiple providers are available), version dropdown, profile dropdown, *Install…*, *New profile…*, *Launch*, *Switch user*. *Launch* spawns the selected game and waits — when it exits, we return to the chooser.
 
 ## Threading
 
