@@ -175,6 +175,11 @@ mount "$ESP" /mnt/boot
 
 # --- 5. Pacstrap --------------------------------------------------------
 log "pacstrap"
+# Refresh the live environment's trusted packager keys before pacstrap.
+# Arch package signatures rotate over time; if the ISO was built from an
+# older archlinux-keyring snapshot, pacstrap can fail with "unknown trust"
+# on otherwise valid packages until the keyring package is upgraded.
+pacman -Sy --noconfirm archlinux-keyring
 pacstrap -K /mnt \
     base linux linux-firmware \
     networkmanager \

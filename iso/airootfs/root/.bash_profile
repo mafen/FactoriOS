@@ -24,6 +24,9 @@ BANNER
     fi
 
     if ping -c1 -W2 archlinux.org >/dev/null 2>&1; then
+        echo "Refreshing Arch keyring…"
+        pacman -Sy --noconfirm archlinux-keyring >/dev/null 2>&1 || true
+        echo
         /usr/local/bin/gameos-install
     else
         echo "No network detected — bring it up with 'nmtui', then run:"
