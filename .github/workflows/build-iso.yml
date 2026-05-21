@@ -91,6 +91,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload staged pacman repo as workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: gameos-repo
+          path: iso/airootfs/var/cache/gameos-repo
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload full ISO as workflow artifact (tag only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v7
@@ -164,3 +172,40 @@ jobs:
     steps:
       - id: deploy
         uses: actions/deploy-pages@v4
+
+  installer-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download staged pacman repo artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: gameos-repo
+          path: iso/airootfs/var/cache/gameos-repo
+
+      - name: Validate keyring refresh and pacstrap path
+        run: |
+          set -euo pipefail
+          docker run --rm --privileged \
+            -v "$GITHUB_WORKSPACE":/work \
+            -v "$GITHUB_WORKSPACE/iso/airootfs/var/cache/gameos-repo":/var/cache/gameos-repo:ro \
+            archlinux:latest bash -euo pipefail -c '
+              pacman -Sy --noconfirm archlinux-keyring
+              pacman -Syu --noconfirm
+              pacman -S --noconfirm --needed arch-install-scripts
+
+              rm -rf /etc/pacman.d/gnupg
+              pacman-key --init
+              pacman-key --populate archlinux
+
+              # This mirrors the live ISO fix: a stale keyring must be
+              # refreshable before pacstrap touches signed packages.
+              pacman -Sy --noconfirm archlinux-keyring
+
+              install -d /tmp/gameos-root
+              pacstrap -C /work/iso/airootfs/etc/pacman.conf -K /tmp/gameos-root \
+                base linux archlinux-keyring \
+                gameos-launcher gameos-greeter gameos-base
+            '
