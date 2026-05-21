@@ -1,8 +1,8 @@
 # factorios-launcher
 
-Pure-Python library + small CLI for FactoriOS' game providers. Today that
-means factorio.com auth/downloads plus local Minecraft install/runtime
-management. No UI, no GTK.
+Pure-Python library + small CLI for FactoriOS' game providers. In this
+appliance configuration the Minecraft provider is the only one enabled by
+default. No UI, no GTK.
 
 The greeter depends on this; future tooling (headless server provisioning, scripted reinstalls, etc.) should too.
 

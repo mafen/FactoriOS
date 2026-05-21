@@ -18,6 +18,7 @@ PROVIDER_CONFIG = ROOT / "providers.json"
 PROVIDER_FACTORIO = "factorio"
 PROVIDER_MINECRAFT = "minecraft"
 ALL_PROVIDERS = (PROVIDER_FACTORIO, PROVIDER_MINECRAFT)
+DEFAULT_ENABLED_PROVIDERS = (PROVIDER_MINECRAFT,)
 
 # Reserved names for the guest/demo flow. factorio.com usernames are
 # alphanumeric, so a leading underscore can never collide with a real one.
@@ -70,12 +71,12 @@ def enabled_providers() -> tuple[str, ...]:
     try:
         data = json.loads(PROVIDER_CONFIG.read_text())
     except (OSError, json.JSONDecodeError):
-        return ALL_PROVIDERS
+        return DEFAULT_ENABLED_PROVIDERS
     if isinstance(data, list):
         providers = [item for item in data if item in ALL_PROVIDERS]
         if providers:
             return tuple(providers)
-    return ALL_PROVIDERS
+    return DEFAULT_ENABLED_PROVIDERS
 
 
 def user_provider_dir(username: str, provider: str) -> Path:

@@ -49,7 +49,7 @@ class ChooserScreen(Gtk.Box):
         if remembered_variant in self._provider.available_variants(self.context.factorio_session):
             self._variant = remembered_variant
 
-        title = Gtk.Label(label="FactoriOS")
+        title = Gtk.Label(label="MinecraftOS")
         title.add_css_class("title-1")
         self.append(title)
 
@@ -124,6 +124,7 @@ class ChooserScreen(Gtk.Box):
         switch = Gtk.Button(label="Switch user")
         switch.connect("clicked", lambda *_: self._on_switch_user())
         actions.append(switch)
+        self.switch_button = switch
         self.launch_button = Gtk.Button(label="Launch")
         self.launch_button.add_css_class("suggested-action")
         self.launch_button.connect("clicked", self._on_launch)
@@ -280,6 +281,7 @@ class ChooserScreen(Gtk.Box):
         self.header_label.set_label(self._subtitle())
         self.forget_button.set_visible(self.context.has_factorio_auth)
         self.mimalloc_check.set_sensitive(self._provider_id == paths.PROVIDER_FACTORIO)
+        self.switch_button.set_visible(self.context.has_factorio_auth)
         self._refresh_variants()
         self._refresh_versions()
         self._refresh_profiles()

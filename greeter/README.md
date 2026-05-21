@@ -5,8 +5,7 @@ FactoriOS system. labwc execs this; nothing else runs.
 
 ## Screens
 
-- **Login** — factorio.com username + password, opt-in *Remember Me*, plus buttons for local Minecraft and the Factorio demo.
-- **Chooser** — game dropdown (when multiple providers are available), version dropdown, profile dropdown, *Install…*, *New profile…*, *Launch*, *Switch user*. *Launch* spawns the selected game and waits — when it exits, we return to the chooser.
+- **Chooser** — direct-boot Minecraft screen with version dropdown, profile dropdown, *Install…*, *New profile…*, and *Launch*. *Launch* spawns the selected game and waits — when it exits, we return to the chooser.
 
 ## Threading
 

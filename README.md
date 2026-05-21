@@ -1,16 +1,15 @@
-# FactoriOS
+# MinecraftOS
 
-A joke Linux distribution whose only purpose is booting straight into games.
-
-Today that means a shared kiosk shell with a logged-in Factorio path and a
-local Minecraft path.
+A joke Linux distribution whose only purpose is booting straight into
+Minecraft.
 
 ## Status
 
 Early scaffolding. Working pieces:
 
-- Launcher library — provider-based game management, factorio.com auth, Factorio downloads, Minecraft manifests/runtime handling, profile management.
-- GTK4 greeter — Factorio login, local Minecraft entry, provider-aware version/profile chooser, opt-in Remember Me for Factorio.
+- Launcher library — provider-based game management, with the appliance
+  configured to expose only the Minecraft provider by default.
+- GTK4 greeter — direct boot into a local Minecraft version/profile chooser.
 - archiso profile — boots into the installer.
 - Shell installer — partitions disk and installs the system.
 
@@ -21,7 +20,7 @@ build.sh     top-level orchestrator: builds packages, stages the local repo, bui
 iso/         archiso profile that produces the installer ISO
 installer/   shell script that runs in the live env to install onto disk
 launcher/    Python library: shared provider model, auth, downloads, version/profile management
-greeter/     GTK4 Python app: login screen + provider-aware version/profile chooser
+greeter/     GTK4 Python app: Minecraft-only kiosk chooser
 packages/    PKGBUILDs for launcher, greeter, and a factorios-base meta-package
 systemd/     factorios.service + supporting config
 ```
@@ -41,7 +40,7 @@ CI also builds the ISO(s): see `.github/workflows/build-iso.yml`. Every push to 
 
 ## Updates
 
-Installed FactoriOS systems can `pacman -Syu` to upgrade Arch + our packages together. The `[factorios]` repo at <https://tomribbens.github.io/FactoriOS/x86_64/> is wired into `/etc/pacman.conf` by the installer; the greeter has an *Updates…* button (footer of the chooser) that calls `pacman -Sy` + lists upgrades + runs `pacman --noconfirm -Syu`, all via a narrow `sudoers.d` rule that allows the kiosk user *only* those two exact invocations.
+Installed systems can `pacman -Syu` to upgrade Arch + our packages together. The `[factorios]` repo at <https://tomribbens.github.io/FactoriOS/x86_64/> is wired into `/etc/pacman.conf` by the installer; the greeter has an *Updates…* button (footer of the chooser) that calls `pacman -Sy` + lists upgrades + runs `pacman --noconfirm -Syu`, all via a narrow `sudoers.d` rule that allows the kiosk user *only* those two exact invocations.
 
 **One-time setup** (repo owner only): the first CI run after enabling Pages distribution needs `Settings → Pages → Source: GitHub Actions` ticked. Without it the `pages` job fails — fix is the same one click.
 
