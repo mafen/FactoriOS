@@ -5,6 +5,7 @@
 # bare metal with WiFi or specific GPU firmware needs.
 base
 linux
+archlinux-keyring
 mkinitcpio
 mkinitcpio-archiso
 

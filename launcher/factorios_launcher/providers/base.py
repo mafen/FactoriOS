@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from ..download import ProgressCb
+
+StatusCb = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,7 @@ class GameProvider(ABC):
         session: Any = None,
         variant: str | None = None,
         progress: ProgressCb | None = None,
+        status: StatusCb | None = None,
     ):
         raise NotImplementedError
 

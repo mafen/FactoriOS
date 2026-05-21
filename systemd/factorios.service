@@ -1,13 +1,13 @@
 [Unit]
-Description=FactoriOS session (labwc + greeter on tty1)
+Description=GameOS session (labwc + greeter on tty1)
 After=systemd-user-sessions.service plymouth-quit-wait.service seatd.service
 Conflicts=getty@tty1.service
 Wants=seatd.service
 
 [Service]
 Type=simple
-User=factorios
-Group=factorios
+User=gameos
+Group=gameos
 PAMName=login
 TTYPath=/dev/tty1
 TTYReset=yes
@@ -27,15 +27,15 @@ Environment=WLR_DRM_NO_ATOMIC=1
 # Force software rendering for the compositor + GTK greeter. Bypasses
 # the linux-dmabuf path which VirtualBox's vmwgfx fails on ("Failed to
 # choose buffer bundle for plane 0"). The greeter is light enough that
-# llvmpipe is fine. Factorio itself will want hardware GL — when we
+# llvmpipe is fine. The game itself will want hardware GL — when we
 # get there, we'll likely scope these envs to the greeter session only.
 Environment=WLR_RENDERER=pixman
 Environment=LIBGL_ALWAYS_SOFTWARE=1
 # labwc -s CMD runs CMD on startup. The greeter is the entire session.
-ExecStartPre=/usr/bin/install -d -o factorios -g factorios -m 700 /run/user/1000
+ExecStartPre=/usr/bin/install -d -o gameos -g gameos -m 700 /run/user/1000
 # Routed through a wrapper that captures the whole session transcript to
-# /var/lib/factorios/session.log — see factorios-session for why.
-ExecStart=/usr/bin/factorios-session
+# /tmp/gameos-session.log — see gameos-session for why.
+ExecStart=/usr/bin/gameos-session
 Restart=always
 RestartSec=2
 

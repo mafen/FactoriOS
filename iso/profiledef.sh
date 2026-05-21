@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 
-# iso_name is variant-tagged via FACTORIOS_VARIANT so the slim and full
+# iso_name is variant-tagged via GAMEOS_VARIANT so the slim and full
 # release ISOs end up with distinct filenames in iso/out/. The variant is
 # set by iso/build.sh from its $1 argument.
-iso_name="factorios${FACTORIOS_VARIANT:+-${FACTORIOS_VARIANT}}"
-iso_label="FACTORIOS_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
-iso_publisher="FactoriOS <https://github.com/tomribbens/FactoriOS>"
-iso_application="FactoriOS Installer"
+iso_name="gameos${GAMEOS_VARIANT:+-${GAMEOS_VARIANT}}"
+iso_label="GAMEOS_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
+iso_publisher="GameOS <https://github.com/tomribbens/FactoriOS>"
+iso_application="GameOS Installer"
 iso_version="$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y.%m.%d)"
-install_dir="factorios"
+install_dir="gameos"
 buildmodes=('iso')
 # BIOS + UEFI so VirtualBox's default (BIOS) VMs Just Work without the user
 # having to flip the firmware setting. The installer itself is still
@@ -28,5 +28,5 @@ file_permissions=(
     ["/etc/shadow"]="0:0:400"
     ["/root"]="0:0:750"
     ["/root/.bash_profile"]="0:0:644"
-    ["/usr/local/bin/factorios-install"]="0:0:755"
+    ["/usr/local/bin/gameos-install"]="0:0:755"
 )

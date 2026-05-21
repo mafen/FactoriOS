@@ -1,11 +1,11 @@
 #!/bin/bash
-# Top-level FactoriOS build.
+# Top-level GameOS build.
 #
 # 1. Builds the three PKGBUILDs (in dependency order).
 # 2. Stages the resulting packages into a local Arch repo at
-#    iso/airootfs/var/cache/factorios-repo/ — this directory shows up at
-#    /var/cache/factorios-repo inside the live ISO, and the live env's
-#    pacman.conf has a [factorios] entry pointing at it via file://.
+#    iso/airootfs/var/cache/gameos-repo/ — this directory shows up at
+#    /var/cache/gameos-repo inside the live ISO, and the live env's
+#    pacman.conf has a [gameos] entry pointing at it via file://.
 # 3. Hands off to iso/build.sh, which runs mkarchiso.
 #
 # Run from anywhere; uses absolute paths internally.
@@ -13,7 +13,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-REPO_DIR="$HERE/iso/airootfs/var/cache/factorios-repo"
+REPO_DIR="$HERE/iso/airootfs/var/cache/gameos-repo"
 
 log() { echo "==> $*"; }
 die() { echo "error: $*" >&2; exit 1; }
@@ -36,7 +36,7 @@ build_pkg() {
     rm -rf "$pkg_src/src" "$pkg_src/pkg" "$pkg_src"/*.pkg.tar.zst
     (
         cd "$pkg_src"
-        # --nodeps: factorios-greeter depends on factorios-launcher, but we
+        # --nodeps: gameos-greeter depends on gameos-launcher, but we
         # build them in order and stage them locally; we don't need pacman to
         # resolve the dep tree just to *build* them.
         makepkg --force --noconfirm --nodeps --skippgpcheck
@@ -50,7 +50,7 @@ build_pkg factorios-base
 
 log "creating repo database"
 repo-add --new --remove \
-    "$REPO_DIR/factorios.db.tar.zst" \
+    "$REPO_DIR/gameos.db.tar.zst" \
     "$REPO_DIR"/*.pkg.tar.zst
 
 log "packages staged:"

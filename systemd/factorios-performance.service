@@ -1,13 +1,13 @@
 [Unit]
-Description=FactoriOS performance tuning (always-on gamemode-style optimizations)
+Description=GameOS performance tuning (always-on gamemode-style optimizations)
 # Run before the kiosk session so the governor + sysctls are already
-# in effect by the time Factorio's first frame is drawn.
-Before=factorios.service
+# in effect by the time Minecraft's first frame is drawn.
+Before=gameos.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/bin/factorios-performance
+ExecStart=/usr/bin/gameos-performance
 StandardOutput=journal
 StandardError=journal
 

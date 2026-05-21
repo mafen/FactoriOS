@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a FactoriOS installer ISO.
+# Build a GameOS installer ISO.
 #
 # Usage:  iso/build.sh [slim|full]   (default: slim)
 #
@@ -24,7 +24,7 @@ case "$VARIANT" in
 esac
 
 # Stage the installer into the airootfs.
-install -Dm755 "$REPO/installer/install.sh" "$HERE/airootfs/usr/local/bin/factorios-install"
+install -Dm755 "$REPO/installer/install.sh" "$HERE/airootfs/usr/local/bin/gameos-install"
 
 mkdir -p "$HERE/out"
 # mkarchiso runs as root and leaves files inside work/ whose mode bits
@@ -57,14 +57,14 @@ if [[ "$VARIANT" == "full" ]]; then
 # --- Added by iso/build.sh full ---
 linux-firmware
 EOF
-    export FACTORIOS_VARIANT=full
+    export GAMEOS_VARIANT=full
 fi
 
 # Run mkarchiso as root (sudo if we're not already).
 if [[ $EUID -eq 0 ]]; then
     mkarchiso -v -w "$HERE/work" -o "$HERE/out" "$HERE"
 else
-    sudo --preserve-env=FACTORIOS_VARIANT \
+    sudo --preserve-env=GAMEOS_VARIANT \
         mkarchiso -v -w "$HERE/work" -o "$HERE/out" "$HERE"
     # mkarchiso left the work/out trees root-owned; hand them back.
     sudo chown -R "$(id -u):$(id -g)" "$HERE/work" "$HERE/out"

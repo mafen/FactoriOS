@@ -1,4 +1,4 @@
-"""Game appliance launcher library used by FactoriOS."""
+"""Game appliance launcher library used by GameOS."""
 
 from .auth import Session, AuthError
 from . import paths, versions, profiles, download

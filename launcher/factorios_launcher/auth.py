@@ -27,7 +27,7 @@ from . import paths
 
 LOGIN_URL = "https://auth.factorio.com/api-login"
 EXPANSION_PROBE_URL = "https://www.factorio.com/get-download/latest/expansion/linux64"
-USER_AGENT = "FactoriOS-greeter/0.1"
+USER_AGENT = "GameOS-greeter/0.1"
 API_VERSION = "6"
 
 
@@ -87,7 +87,7 @@ class Session:
         self.username = returned_username or username_or_email
         self.token = token
         # Diagnostic: confirm which username/token shape we actually got
-        # — lands in /tmp/factorios-session.log alongside the seed lines.
+        # — lands in /tmp/gameos-session.log alongside the seed lines.
         print(
             f"auth: api_version={API_VERSION} token={token[:6]}…({len(token)} chars) "
             f"username={self.username!r} (returned={returned_username!r}, typed={username_or_email!r})",

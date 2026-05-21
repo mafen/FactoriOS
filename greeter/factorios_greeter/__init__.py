@@ -1,1 +1,1 @@
-"""FactoriOS GUI greeter (GTK4)."""
+"""GameOS GUI greeter (GTK4)."""

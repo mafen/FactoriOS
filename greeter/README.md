@@ -1,23 +1,18 @@
-# factorios-greeter
+# gameos-greeter
 
-GTK4 application that *is* the entire user-facing surface of an installed
-FactoriOS system. labwc execs this; nothing else runs.
+GTK4 kiosk application for GameOS.
+
+This branch boots directly into the Minecraft chooser. The active UI surface is
+single-provider even though the backend stays provider-based.
 
 ## Screens
 
-- **Login** — factorio.com username + password, opt-in *Remember Me*, plus buttons for local Minecraft and the Factorio demo.
-- **Chooser** — game dropdown (when multiple providers are available), version dropdown, profile dropdown, *Install…*, *New profile…*, *Launch*, *Switch user*. *Launch* spawns the selected game and waits — when it exits, we return to the chooser.
+- **Chooser** — Minecraft version dropdown, profile dropdown, install flow,
+  profile creation/deletion, launch, updates, and power controls.
 
-## Threading
+## Notes
 
-GTK is single-threaded. Anything that hits the network or the disk goes through `worker.run()`, which runs the callable on a daemon thread and posts the result back to the main loop via `GLib.idle_add`.
-
-## Run in dev
-
-Outside the kiosk you won't have `/var/lib/factorios/` writable — the greeter silently skips the Remember Me writes, so it still works on a normal desktop:
-
-```
-PYTHONPATH=launcher:greeter python -m factorios_greeter
-```
-
-Requires `python-gobject`, `gtk4`, `python-requests`.
+- Installs run in a worker thread and feed back both stage messages and byte
+  progress.
+- The chooser remembers the last launched Minecraft version/profile for the
+  local appliance user.

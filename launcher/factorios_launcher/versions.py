@@ -1,4 +1,4 @@
-"""Manage installed Factorio versions under /var/lib/factorios/versions/.
+"""Manage installed Factorio versions under the GameOS data root.
 
 Authenticated installs live at `versions/<version>-<build>/`. The demo lives
 at `versions/_demo/` (no build dimension — demo is its own build).

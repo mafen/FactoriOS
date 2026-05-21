@@ -1,8 +1,8 @@
 #!/bin/bash
-# FactoriOS installer. Runs in the archiso live environment.
+# GameOS installer. Runs in the archiso live environment.
 #
-# UEFI-only. Wipes the chosen disk. Installs minimal Arch + factorios-* pkgs,
-# enables factorios.service so the greeter comes up on next boot.
+# UEFI-only. Wipes the chosen disk. Installs minimal Arch + gameos-* pkgs,
+# enables gameos.service so the greeter comes up on next boot.
 set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -19,13 +19,13 @@ menu_args=()
 for i in "${!disks[@]}"; do
     menu_args+=("$i" "${disks[$i]}")
 done
-choice=$(whiptail --title "FactoriOS installer" \
+choice=$(whiptail --title "GameOS installer" \
     --menu "Select the target disk. EVERYTHING ON IT WILL BE ERASED." \
     20 70 10 "${menu_args[@]}" 3>&1 1>&2 2>&3)
 DISK=$(echo "${disks[$choice]}" | awk '{print $1}')
 
 whiptail --title "Confirm" --yesno \
-    "Wipe $DISK and install FactoriOS?\n\nThis cannot be undone." 10 60 \
+    "Wipe $DISK and install GameOS?\n\nThis cannot be undone." 10 60 \
     || die "aborted"
 
 # --- 2. Keyboard layout -------------------------------------------------
@@ -112,18 +112,8 @@ fi
 KEYBOARD="${XKB_TO_KEYMAP[${XKB_LAYOUT}${XKB_VARIANT:+(${XKB_VARIANT})}]:-${XKB_TO_KEYMAP[$XKB_LAYOUT]:-$XKB_LAYOUT}}"
 loadkeys "$KEYBOARD" || log "loadkeys $KEYBOARD failed (continuing — installed system will still try)"
 
-# --- 3. Optional pre-seed factorio.com creds ----------------------------
-SEED_USER=""
-SEED_PASS=""
-if whiptail --title "factorio.com" \
-        --yesno "Pre-seed factorio.com credentials so the first boot skips the login screen?" \
-        10 60; then
-    SEED_USER=$(whiptail --title "factorio.com" --inputbox "Username or email" 10 60 3>&1 1>&2 2>&3) || true
-    SEED_PASS=$(whiptail --title "factorio.com" --passwordbox "Password" 10 60 3>&1 1>&2 2>&3) || true
-fi
-
-# --- 4. Hostname / timezone --------------------------------------------
-HOSTNAME=$(whiptail --title "Hostname" --inputbox "" 10 60 "factorios" 3>&1 1>&2 2>&3)
+# --- 3. Hostname / timezone --------------------------------------------
+HOSTNAME=$(whiptail --title "Hostname" --inputbox "" 10 60 "gameos" 3>&1 1>&2 2>&3)
 
 # Timezone: pick a region first, then a city in that region. Mirrors the
 # layout of /usr/share/zoneinfo (which tzdata ships) — we don't hardcode
@@ -156,7 +146,7 @@ else
     TIMEZONE="$TZ_REGION/$TZ_CITY"
 fi
 
-# --- 5. Partition -------------------------------------------------------
+# --- 4. Partition -------------------------------------------------------
 log "partitioning $DISK"
 wipefs -a "$DISK"
 parted -s "$DISK" \
@@ -183,8 +173,13 @@ mount "$ROOT" /mnt
 mkdir -p /mnt/boot
 mount "$ESP" /mnt/boot
 
-# --- 6. Pacstrap --------------------------------------------------------
+# --- 5. Pacstrap --------------------------------------------------------
 log "pacstrap"
+# Refresh the live environment's trusted packager keys before pacstrap.
+# Arch package signatures rotate over time; if the ISO was built from an
+# older archlinux-keyring snapshot, pacstrap can fail with "unknown trust"
+# on otherwise valid packages until the keyring package is upgraded.
+pacman -Sy --noconfirm archlinux-keyring
 pacstrap -K /mnt \
     base linux linux-firmware \
     networkmanager \
@@ -192,30 +187,12 @@ pacstrap -K /mnt \
     mesa vulkan-icd-loader \
     pipewire pipewire-pulse pipewire-alsa wireplumber \
     python python-requests python-gobject gtk4 \
-    factorios-launcher factorios-greeter factorios-base
+    gameos-launcher gameos-greeter gameos-base
 
 genfstab -U /mnt >> /mnt/etc/fstab
 
-# --- 7. In-chroot config ------------------------------------------------
+# --- 6. In-chroot config ------------------------------------------------
 log "configuring system"
-
-# Size 1 GiB hugepages for mimalloc against the host's RAM (read from
-# /proc/meminfo in the live env — the same machine that's about to boot
-# the installed system). Reserve roughly half of RAM beyond a 4 GiB
-# headroom for the kernel + labwc + Factorio's non-mimalloc allocations,
-# cap at 12 GiB so we never strand more than Factorio can usefully use.
-# Skip the cmdline params entirely under 6 GiB total — the headroom math
-# leaves nothing to reserve and the kernel complains about hugepages=0.
-mem_gib=$(awk '/^MemTotal:/ {print int($2/1048576)}' /proc/meminfo)
-if (( mem_gib >= 6 )); then
-    huge_n=$(( (mem_gib - 4) / 2 ))
-    (( huge_n > 12 )) && huge_n=12
-    HUGE_OPTS=" default_hugepagesz=1G hugepagesz=1G hugepages=${huge_n}"
-    log "reserving ${huge_n}x 1 GiB hugepages (host has ${mem_gib} GiB)"
-else
-    HUGE_OPTS=""
-    log "skipping hugepage reservation (host has ${mem_gib} GiB, need >=6)"
-fi
 
 arch-chroot /mnt /bin/bash -e <<EOF
 ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
@@ -246,14 +223,13 @@ ${XKB_VARIANT:+XKB_DEFAULT_VARIANT=$XKB_VARIANT}
 ENV
 echo "$HOSTNAME" > /etc/hostname
 
-# factorios user creation is declarative via factorios-base's sysusers.d
+# gameos user creation is declarative via gameos-base's sysusers.d
 # entry, which pacman triggers after each transaction. This is just a
 # safety net for the unlikely case that systemd-sysusers didn't run.
-id factorios &>/dev/null || useradd -m -u 1000 -s /usr/bin/nologin -G seat,video,input,render factorios
+id gameos &>/dev/null || useradd -m -u 1000 -s /usr/bin/nologin -G seat,video,input,render gameos
 
 # Passwordless root for tty/console recovery. Appliance-OS pattern:
-# factorio.com is the real auth surface, root only exists so anyone with
-# physical access can debug when labwc/the greeter falls over. The kiosk
+# root only exists so anyone with physical access can debug when labwc/the greeter falls over. The kiosk
 # session doesn't expose a shell, so this isn't a remote-access risk.
 passwd -d root
 
@@ -261,56 +237,40 @@ passwd -d root
 bootctl install
 # Verbose-by-default boot: show the systemd-boot menu for a few seconds
 # and let the kernel log to the console. The compositor still owns tty1
-# once factorios.service starts, so this only affects very early boot.
+# once gameos.service starts, so this only affects very early boot.
 cat > /boot/loader/loader.conf <<LOADER
-default factorios
+default gameos
 timeout 3
 console-mode max
 LOADER
-cat > /boot/loader/entries/factorios.conf <<ENTRY
-title   FactoriOS
+cat > /boot/loader/entries/gameos.conf <<ENTRY
+title   GameOS
 linux   /vmlinuz-linux
 initrd  /initramfs-linux.img
-options root=PARTUUID=$(blkid -s PARTUUID -o value "$ROOT") rw${HUGE_OPTS}
+options root=PARTUUID=$(blkid -s PARTUUID -o value "$ROOT") rw
 ENTRY
 
 systemctl enable NetworkManager.service
 systemctl enable seatd.service
-systemctl enable factorios.service
-systemctl enable factorios-performance.service
+systemctl enable gameos.service
+systemctl enable gameos-performance.service
 systemctl set-default graphical.target
 
-# Add the [factorios] repo so pacman -Syu can pull updates to our own
+# Add the [gameos] repo so pacman -Syu can pull updates to our own
 # packages alongside everything else. CI publishes to GitHub Pages on
 # every push to main.
 #
 # Inner heredoc must be quoted ('PACMAN'): we're already inside the
 # arch-chroot's unquoted heredoc, so without the quotes the chroot's
 # bash expands \$arch again — to empty, since \$arch is unset there —
-# and pacman ends up requesting .../FactoriOS/factorios.db instead of
-# .../FactoriOS/x86_64/factorios.db.
+# and pacman ends up requesting .../FactoriOS/gameos.db instead of
+# .../FactoriOS/x86_64/gameos.db.
 cat >> /etc/pacman.conf <<'PACMAN'
 
-[factorios]
+[gameos]
 SigLevel = Optional TrustAll
 Server = https://tomribbens.github.io/FactoriOS/\$arch
 PACMAN
 EOF
-
-# --- 8. Optional credential seeding ------------------------------------
-if [[ -n "$SEED_USER" && -n "$SEED_PASS" ]]; then
-    log "pre-seeding factorio.com session"
-    arch-chroot /mnt /bin/bash -e <<EOF
-install -d -o factorios -g factorios -m 700 /var/lib/factorios/users/$SEED_USER
-runuser -u factorios -- python -c "
-from factorios_launcher.auth import Session
-from factorios_launcher import paths
-s = Session().login('$SEED_USER', '''$SEED_PASS''')
-s.save(paths.user_session('$SEED_USER'))
-"
-echo "$SEED_USER" > /var/lib/factorios/last-user
-chown factorios:factorios /var/lib/factorios/last-user
-EOF
-fi
 
 log "done. you can now reboot."

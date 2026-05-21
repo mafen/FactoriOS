@@ -2,21 +2,20 @@
 #
 # Meta-package: pulls in everything an installed FactoriOS system needs and
 # drops the systemd unit + the factorios system user.
-pkgname=factorios-base
+pkgname=gameos-base
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="FactoriOS system glue for the multi-game kiosk session"
+pkgdesc="GameOS system glue for the kiosk session"
 arch=('any')
-url="https://example.invalid/factorios"
+url="https://example.invalid/gameos"
 license=('MIT')
 depends=(
-    'factorios-greeter'
-    'factorios-launcher'
+    'gameos-greeter'
+    'gameos-launcher'
     'labwc'
     'seatd'
     'mesa'
     'vulkan-icd-loader'
-    'mimalloc'
     'networkmanager'
     'alsa-lib'
     'freetype2'
@@ -27,6 +26,7 @@ depends=(
     'libxss'
     'libxtst'
     'nss'
+    'jre21-openjdk'
     'xorg-xwayland'
     # The greeter's Updates… button shells out to `sudo pacman` via a
     # sudoers.d rule shipped by this package. `base` doesn't pull sudo.
@@ -48,23 +48,31 @@ prepare() {
 
 package() {
     install -Dm644 "$srcdir/factorios.service" \
-        "$pkgdir/usr/lib/systemd/system/factorios.service"
+        "$pkgdir/usr/lib/systemd/system/gameos.service"
     install -Dm644 "$srcdir/factorios-performance.service" \
-        "$pkgdir/usr/lib/systemd/system/factorios-performance.service"
+        "$pkgdir/usr/lib/systemd/system/gameos-performance.service"
     install -Dm755 "$srcdir/factorios-session" \
-        "$pkgdir/usr/bin/factorios-session"
+        "$pkgdir/usr/bin/gameos-session"
     install -Dm755 "$srcdir/factorios-performance" \
-        "$pkgdir/usr/bin/factorios-performance"
+        "$pkgdir/usr/bin/gameos-performance"
     install -Dm644 "$srcdir/factorios-tmpfiles.conf" \
-        "$pkgdir/usr/lib/tmpfiles.d/factorios.conf"
+        "$pkgdir/usr/lib/tmpfiles.d/gameos.conf"
     install -Dm644 "$srcdir/factorios-sysusers.conf" \
-        "$pkgdir/usr/lib/sysusers.d/factorios.conf"
+        "$pkgdir/usr/lib/sysusers.d/gameos.conf"
     # sudoers files must be mode 440 — sudo refuses to read otherwise.
     install -Dm440 "$srcdir/factorios-pacman.sudoers" \
-        "$pkgdir/etc/sudoers.d/factorios-pacman"
+        "$pkgdir/etc/sudoers.d/gameos-pacman"
     # labwc kiosk overrides. /etc/xdg/labwc/ is one of the directories
     # labwc searches per XDG; rc.xml here suppresses the default root
     # menu so right-click on the empty surface does nothing.
     install -Dm644 "$srcdir/factorios-labwc-rc.xml" \
         "$pkgdir/etc/xdg/labwc/rc.xml"
+
+    ln -s gameos.service "$pkgdir/usr/lib/systemd/system/factorios.service"
+    ln -s gameos-performance.service "$pkgdir/usr/lib/systemd/system/factorios-performance.service"
+    ln -s gameos-session "$pkgdir/usr/bin/factorios-session"
+    ln -s gameos-performance "$pkgdir/usr/bin/factorios-performance"
+    ln -s gameos.conf "$pkgdir/usr/lib/tmpfiles.d/factorios.conf"
+    ln -s gameos.conf "$pkgdir/usr/lib/sysusers.d/factorios.conf"
+    ln -s gameos-pacman "$pkgdir/etc/sudoers.d/factorios-pacman"
 }
