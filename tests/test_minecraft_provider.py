@@ -14,6 +14,7 @@ from factorios_launcher.providers.minecraft import (
     _merge_version_meta,
     _offline_player_name,
     _replace_placeholders,
+    _resolve_runtime_component,
     _resolve_version_chain,
     _rules_allow,
 )
@@ -142,6 +143,27 @@ class MinecraftProviderTests(unittest.TestCase):
 
         with self.assertRaises(MinecraftError):
             _download_to(http, "https://file", dest, sha1="deadbeef", label="test file")
+
+    def test_runtime_component_falls_back_when_requested_feed_is_missing(self):
+        http = FakeHTTP(
+            {
+                "https://launchermeta.mojang.com/v1/products/java-runtime/java-runtime-delta/all.json": lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("http 404")),
+                "https://launchermeta.mojang.com/v1/products/java-runtime/java-runtime-gamma/all.json": FakeResponse(
+                    {"linux": [{"manifest": {"url": "https://runtime-manifest"}}]}
+                ),
+            }
+        )
+
+        with mock.patch(
+            "factorios_launcher.providers.minecraft._fetch_json",
+            side_effect=[
+                MinecraftError("missing delta"),
+                {"linux": [{"manifest": {"url": "https://runtime-manifest"}}]},
+            ],
+        ):
+            resolved = _resolve_runtime_component(http, "java-runtime-delta")
+
+        self.assertEqual(resolved, "java-runtime-gamma")
 
     def test_launch_builds_expected_arguments_and_updates_instance_metadata(self):
         provider = MinecraftProvider()

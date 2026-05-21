@@ -36,6 +36,12 @@ ARCH_NAME = "64" if platform.machine().lower() in {"x86_64", "amd64"} else platf
 RULE_OS = "linux"
 LAUNCHER_BRAND = "GameOS"
 LAUNCHER_VERSION = "0.1"
+JAVA_RUNTIME_CANDIDATES = (
+    "java-runtime-gamma",
+    "java-runtime-beta",
+    "java-runtime-alpha",
+    "jre-legacy",
+)
 
 
 class MinecraftError(RuntimeError):
@@ -162,7 +168,7 @@ class MinecraftProvider(GameProvider):
             _push_status(status, "Downloading libraries…")
             self._install_libraries(http, resolved, stage, progress=progress)
             _push_status(status, "Provisioning Java runtime…")
-            runtime_component = self._install_runtime(http, resolved, progress=progress)
+            runtime_component = self._install_runtime(http, resolved, progress=progress, status=status)
 
             resolved["_gameos"] = {
                 "runtime_component": runtime_component,
@@ -300,8 +306,15 @@ class MinecraftProvider(GameProvider):
         http: requests.Session,
         version_meta: dict,
         progress: ProgressCb | None = None,
+        status: StatusCb | None = None,
     ) -> str:
-        component = ((version_meta.get("javaVersion") or {}).get("component")) or "jre-legacy"
+        requested_component = ((version_meta.get("javaVersion") or {}).get("component")) or "jre-legacy"
+        component = _resolve_runtime_component(http, requested_component)
+        if component != requested_component:
+            _push_status(
+                status,
+                f"Runtime {requested_component} is unavailable; using {component} instead.",
+            )
         runtimes_root = paths.provider_runtimes(self.id)
         runtime_home = runtimes_root / component
         version_marker = runtime_home / ".runtime-version"
@@ -472,6 +485,20 @@ def _resolve_version_meta(http: requests.Session, manifest: dict, version: str) 
         raise MinecraftError(f"Unknown Minecraft version: {version}")
     cache: dict[str, dict] = {}
     return _resolve_version_chain(http, versions, version, cache)
+
+
+def _resolve_runtime_component(http: requests.Session, requested_component: str) -> str:
+    candidates = [requested_component]
+    candidates.extend(component for component in JAVA_RUNTIME_CANDIDATES if component != requested_component)
+    for component in candidates:
+        try:
+            _fetch_json(http, JAVA_RUNTIME_URL.format(component=component), f"Java runtime feed for {component}")
+            return component
+        except MinecraftError:
+            continue
+    raise MinecraftError(
+        f"No supported managed Java runtime feed is available for {requested_component} on {OS_NAME}."
+    )
 
 
 def _resolve_version_chain(
