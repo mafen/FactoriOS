@@ -1,4 +1,4 @@
-"""FactoriOS greeter Gtk.Application — top-level wiring."""
+"""GameOS greeter Gtk.Application — top-level wiring."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
-from factorios_launcher import paths
+from gameos_launcher import paths
 
 from .chooser import ChooserScreen
 from .context import UserContext
@@ -31,7 +31,7 @@ class GreeterWindow(Gtk.ApplicationWindow):
 
 class GreeterApp(Gtk.Application):
     def __init__(self) -> None:
-        super().__init__(application_id="com.factorios.Greeter")
+        super().__init__(application_id="com.gameos.Greeter")
 
     def do_activate(self) -> None:
         window = GreeterWindow(self)

@@ -1,5 +1,5 @@
-# User creation and /var/lib/factorios ownership are handled declaratively
-# by /usr/lib/sysusers.d/factorios.conf and /usr/lib/tmpfiles.d/factorios.conf
+# User creation and /var/lib/gameos ownership are handled declaratively
+# by /usr/lib/sysusers.d/gameos.conf and /usr/lib/tmpfiles.d/gameos.conf
 # respectively — pacman runs systemd-sysusers and systemd-tmpfiles --create
 # automatically after each transaction, so we don't need to do anything
 # imperative here.
@@ -7,22 +7,22 @@
 post_install() {
     systemctl daemon-reload
     echo
-    echo "FactoriOS installed. Enable the session with:"
-    echo "  systemctl enable factorios.service"
-    echo "  systemctl enable factorios-performance.service"
+    echo "GameOS installed. Enable the session with:"
+    echo "  systemctl enable gameos.service"
+    echo "  systemctl enable gameos-performance.service"
     echo
 }
 
 post_upgrade() {
     systemctl daemon-reload
-    # factorios-performance.service ships from v1.2 onward. Enable +
+    # gameos-performance.service ships from v1.2 onward. Enable +
     # start it on upgrade so existing installs pick up the always-on
     # gamemode-style tuning without a reinstall. Idempotent on later
     # upgrades.
-    systemctl enable --now factorios-performance.service 2>/dev/null || true
+    systemctl enable --now gameos-performance.service 2>/dev/null || true
 }
 
 pre_remove() {
-    systemctl disable factorios.service 2>/dev/null || true
-    systemctl disable factorios-performance.service 2>/dev/null || true
+    systemctl disable gameos.service 2>/dev/null || true
+    systemctl disable gameos-performance.service 2>/dev/null || true
 }

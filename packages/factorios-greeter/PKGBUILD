@@ -1,16 +1,16 @@
 # Maintainer: FactoriOS
-pkgname=factorios-greeter
+pkgname=gameos-greeter
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="GTK4 multi-game greeter for FactoriOS"
+pkgdesc="GTK4 appliance greeter for GameOS"
 arch=('any')
-url="https://example.invalid/factorios"
+url="https://example.invalid/gameos"
 license=('MIT')
 depends=(
     'python'
     'python-gobject'
     'gtk4'
-    'factorios-launcher'
+    'gameos-launcher'
 )
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 source=()

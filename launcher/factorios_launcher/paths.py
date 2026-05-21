@@ -1,4 +1,4 @@
-"""Single source of truth for FactoriOS on-disk layout.
+"""Single source of truth for GameOS on-disk layout.
 
 The original appliance only knew about Factorio, so several helpers below
 remain Factorio-shaped for compatibility. New code should prefer the
@@ -8,7 +8,8 @@ provider-oriented helpers near the top of the file.
 import json
 from pathlib import Path
 
-ROOT = Path("/var/lib/factorios")
+ROOT = Path("/var/lib/gameos")
+LEGACY_ROOT = Path("/var/lib/factorios")
 VERSIONS = ROOT / "versions"
 USERS = ROOT / "users"
 LAST_USER = ROOT / "last-user"
@@ -89,6 +90,30 @@ def user_provider_profiles(username: str, provider: str) -> Path:
 
 def user_provider_profile(username: str, provider: str, profile: str) -> Path:
     return user_provider_profiles(username, provider) / profile
+
+
+def legacy_user_dir(username: str) -> Path:
+    return LEGACY_ROOT / "users" / username
+
+
+def legacy_user_session(username: str) -> Path:
+    return legacy_user_dir(username) / "session.json"
+
+
+def legacy_user_last_launch(username: str) -> Path:
+    return legacy_user_dir(username) / "last-launch.json"
+
+
+def existing_user_session(username: str) -> Path:
+    new = user_session(username)
+    old = legacy_user_session(username)
+    return new if new.exists() or not old.exists() else old
+
+
+def existing_user_last_launch(username: str) -> Path:
+    new = user_last_launch(username)
+    old = legacy_user_last_launch(username)
+    return new if new.exists() or not old.exists() else old
 
 
 # --- users / sessions / profiles --------------------------------------

@@ -17,7 +17,7 @@ packages/**/src/
 packages/**/*.pkg.tar.*
 
 # Local repo staged into the airootfs by build.sh
-iso/airootfs/var/cache/factorios-repo/
+iso/airootfs/var/cache/gameos-repo/
 
 # Per-user Claude Code settings
 .claude/settings.local.json

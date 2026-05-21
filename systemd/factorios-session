@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wrapper for the FactoriOS session. Two reasons for the indirection:
+# Wrapper for the GameOS session. Two reasons for the indirection:
 #
 # 1. The systemd unit's StandardError=journal doesn't reliably capture
 #    stderr from grandchild processes (labwc spawns the greeter via -s,
@@ -14,13 +14,13 @@
 # latest session.
 set -euo pipefail
 
-# /tmp is always writable; /var/lib/factorios needs the tmpfiles.d entry to
-# guarantee factorios ownership, and we don't want a chicken-and-egg
+# /tmp is always writable; /var/lib/gameos needs the tmpfiles.d entry to
+# guarantee gameos ownership, and we don't want a chicken-and-egg
 # situation where the log can't be written because the perms aren't fixed.
-LOG=/tmp/factorios-session.log
+LOG=/tmp/gameos-session.log
 exec >"$LOG" 2>&1
 
-echo "=== $(date -Iseconds) FactoriOS session start (pid=$$) ==="
+echo "=== $(date -Iseconds) GameOS session start (pid=$$) ==="
 echo "id: $(id)"
 echo "groups: $(groups)"
 echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-(unset)}"
@@ -31,8 +31,8 @@ echo
 echo "--- /dev/dri/ ---"
 ls -la /dev/dri/ || true
 echo
-echo "--- factorios runtime dir ---"
+echo "--- gameos runtime dir ---"
 ls -la "${XDG_RUNTIME_DIR:-/run/user/1000}" 2>&1 || true
 echo
-echo "--- labwc -d -s factorios-greeter ---"
-exec /usr/bin/labwc -d -s /usr/bin/factorios-greeter
+echo "--- labwc -d -s gameos-greeter ---"
+exec /usr/bin/labwc -d -s /usr/bin/gameos-greeter

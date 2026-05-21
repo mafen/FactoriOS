@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: write   # attach ISOs to a release on tag pushes
-  pages: write      # publish the [factorios] pacman repo to GitHub Pages
+  pages: write      # publish the [gameos] pacman repo to GitHub Pages
   id-token: write   # actions/deploy-pages OIDC
 
 # Don't run two Pages deploys concurrently — github-pages env enforces it
@@ -77,7 +77,7 @@ jobs:
 
               # Full build. Only on tag pushes. Reuses the local Arch repo
               # that the slim build already staged into the airootfs, so no
-              # need to rebuild the factorios-* PKGBUILDs.
+              # need to rebuild the gameos-* PKGBUILDs.
               if [[ "$BUILD_FULL" == "true" ]]; then
                 sudo -u builder ./iso/build.sh full
               fi
@@ -86,8 +86,8 @@ jobs:
       - name: Upload slim ISO as workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: factorios-slim
-          path: iso/out/factorios-2*.iso
+          name: gameos-slim
+          path: iso/out/gameos-2*.iso
           if-no-files-found: error
           retention-days: 30
 
@@ -95,8 +95,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v7
         with:
-          name: factorios-full
-          path: iso/out/factorios-full-*.iso
+          name: gameos-full
+          path: iso/out/gameos-full-*.iso
           if-no-files-found: error
           retention-days: 30
 
@@ -105,13 +105,13 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            iso/out/factorios-2*.iso
-            iso/out/factorios-full-*.iso
+            iso/out/gameos-*.iso
+            iso/out/gameos-full-*.iso
           generate_release_notes: true
 
-      # --- Publish the [factorios] pacman repo to GitHub Pages -------------
+      # --- Publish the [gameos] pacman repo to GitHub Pages -------------
       # Served at https://tomribbens.github.io/FactoriOS/x86_64/. The
-      # installer wires this as a [factorios] entry in /etc/pacman.conf so
+      # installer wires this as a [gameos] entry in /etc/pacman.conf so
       # `pacman -Syu` on an installed system picks up new package versions
       # alongside the rest of Arch. main pushes only — PRs and tags don't
       # republish.
@@ -124,24 +124,24 @@ jobs:
           # try to mkdir anywhere.
           sudo chown -R "$USER":"$USER" .
           mkdir -p gh-pages-stage/x86_64
-          src=iso/airootfs/var/cache/factorios-repo
+          src=iso/airootfs/var/cache/gameos-repo
           # Copy the package files as-is.
           cp "$src"/*.pkg.tar.zst gh-pages-stage/x86_64/
-          # `repo-add` creates {factorios.db,factorios.files} as symlinks
+          # `repo-add` creates {gameos.db,gameos.files} as symlinks
           # to the corresponding .tar.zst — pacman requests them by the
           # short name. GitHub Pages doesn't reliably serve symlinks, so
           # materialize both names as regular files.
-          for stem in factorios.db factorios.files; do
+          for stem in gameos.db gameos.files; do
               cp "$src/$stem.tar.zst" "gh-pages-stage/x86_64/$stem.tar.zst"
               cp "$src/$stem.tar.zst" "gh-pages-stage/x86_64/$stem"
           done
           # Convenience landing page so a browser visit isn't a 404.
           cat > gh-pages-stage/index.html <<'EOF'
-          <!doctype html><meta charset=utf-8><title>FactoriOS pacman repo</title>
-          <h1>FactoriOS</h1>
-          <p>This is the pacman repo for <a href="https://github.com/tomribbens/FactoriOS">FactoriOS</a>.</p>
+          <!doctype html><meta charset=utf-8><title>GameOS pacman repo</title>
+          <h1>GameOS</h1>
+          <p>This is the pacman repo for <a href="https://github.com/tomribbens/FactoriOS">GameOS</a>.</p>
           <p>Add to <code>/etc/pacman.conf</code>:</p>
-          <pre>[factorios]
+          <pre>[gameos]
           SigLevel = Optional TrustAll
           Server = https://tomribbens.github.io/FactoriOS/$arch
           </pre>

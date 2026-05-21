@@ -1,8 +1,7 @@
-"""Provider-aware chooser for installed games and profiles."""
+"""Minecraft appliance chooser."""
 
 from __future__ import annotations
 
-import json
 from typing import Callable
 
 import gi
@@ -10,12 +9,14 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from factorios_launcher import LaunchSelection, get_provider, paths
-from factorios_launcher.download import ProgressStats, parse_version
-from factorios_launcher.providers import all_providers
+from gameos_launcher import LaunchSelection, get_provider, paths
+from gameos_launcher.download import ProgressStats
+from gameos_launcher.last_launch import load_last_launch, save_last_launch
 
 from . import power, updates, worker
 from .context import UserContext
+
+DEFAULT_PROFILE = "default"
 
 
 class ChooserScreen(Gtk.Box):
@@ -27,53 +28,16 @@ class ChooserScreen(Gtk.Box):
         self.set_margin_end(80)
         self.context = context
         self._on_switch_user = on_switch_user
+        self._provider = get_provider(paths.PROVIDER_MINECRAFT)
         self._last_launch = self._load_last_launch()
-        self._release_cache: dict[tuple[str, str | None], list] = {}
 
-        self._provider_ids = [
-            provider.id
-            for provider in all_providers()
-            if not provider.requires_auth or context.has_factorio_auth
-        ]
-        remembered_provider = (self._last_launch or {}).get("provider")
-        if remembered_provider in self._provider_ids:
-            self._provider_id = remembered_provider
-        elif context.has_factorio_auth:
-            self._provider_id = paths.PROVIDER_FACTORIO
-        else:
-            self._provider_id = paths.PROVIDER_MINECRAFT
-        self._provider = get_provider(self._provider_id)
-
-        remembered_variant = (self._last_launch or {}).get("variant")
-        self._variant = self._default_variant()
-        if remembered_variant in self._provider.available_variants(self.context.factorio_session):
-            self._variant = remembered_variant
-
-        title = Gtk.Label(label="MinecraftOS")
+        title = Gtk.Label(label="GameOS")
         title.add_css_class("title-1")
         self.append(title)
 
-        subtitle = Gtk.Label(label=self._subtitle(), xalign=0)
+        subtitle = Gtk.Label(label="Minecraft appliance", xalign=0)
         subtitle.add_css_class("dim-label")
-        self.header_label = subtitle
         self.append(subtitle)
-
-        self.provider_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.provider_row.append(Gtk.Label(label="Game", xalign=0))
-        self.provider_combo = Gtk.DropDown.new_from_strings([get_provider(pid).name for pid in self._provider_ids])
-        self.provider_combo.set_selected(self._provider_ids.index(self._provider_id))
-        self.provider_combo.connect("notify::selected", self._on_provider_changed)
-        self.provider_row.append(self.provider_combo)
-        self.provider_row.set_visible(len(self._provider_ids) > 1)
-        self.append(self.provider_row)
-
-        self.variant_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.variant_label = Gtk.Label(label="Build", xalign=0)
-        self.variant_row.append(self.variant_label)
-        self.variant_combo = Gtk.DropDown.new_from_strings([])
-        self.variant_combo.connect("notify::selected", self._on_variant_changed)
-        self.variant_row.append(self.variant_combo)
-        self.append(self.variant_row)
 
         self.append(Gtk.Label(label="Version", xalign=0))
         version_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -87,11 +51,6 @@ class ChooserScreen(Gtk.Box):
         self.delete_version_button.connect("clicked", self._on_delete_version)
         version_row.append(self.delete_version_button)
         self.append(version_row)
-
-        self.update_hint = Gtk.Label(label="", xalign=0)
-        self.update_hint.add_css_class("dim-label")
-        self.update_hint.set_visible(False)
-        self.append(self.update_hint)
 
         self.append(Gtk.Label(label="Profile", xalign=0))
         profile_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -117,14 +76,6 @@ class ChooserScreen(Gtk.Box):
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_halign(Gtk.Align.END)
-        self.mimalloc_check = Gtk.CheckButton.new_with_label("Use mimalloc (Factorio only)")
-        remembered_mimalloc = (self._last_launch or {}).get("use_mimalloc", True)
-        self.mimalloc_check.set_active(bool(remembered_mimalloc))
-        actions.append(self.mimalloc_check)
-        switch = Gtk.Button(label="Switch user")
-        switch.connect("clicked", lambda *_: self._on_switch_user())
-        actions.append(switch)
-        self.switch_button = switch
         self.launch_button = Gtk.Button(label="Launch")
         self.launch_button.add_css_class("suggested-action")
         self.launch_button.connect("clicked", self._on_launch)
@@ -132,10 +83,6 @@ class ChooserScreen(Gtk.Box):
         self.append(actions)
 
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.forget_button = Gtk.Button(label="Forget me")
-        self.forget_button.add_css_class("flat")
-        self.forget_button.connect("clicked", self._on_forget_me)
-        footer.append(self.forget_button)
         updates_btn = Gtk.Button(label="Updates…")
         updates_btn.add_css_class("flat")
         updates_btn.connect("clicked", lambda *_: updates.show_dialog(self))
@@ -144,48 +91,23 @@ class ChooserScreen(Gtk.Box):
         footer.append(power.make_row())
         self.append(footer)
 
-        self._refresh_all()
-
-    def _subtitle(self) -> str:
-        if self.context.has_factorio_auth:
-            return f"Signed in as {self.context.username}"
-        return "Local Minecraft profile"
-
-    def _remembered(self, key: str):
-        if not self._last_launch:
-            return None
-        if self._last_launch.get("provider") != self._provider_id:
-            return None
-        if self._last_launch.get("variant") != self._variant:
-            return None
-        return self._last_launch.get(key)
+        self._refresh_versions()
+        self._refresh_profiles()
 
     def _load_last_launch(self) -> dict | None:
-        path = paths.user_last_launch(self.context.username)
-        try:
-            data = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return None
-        return data if isinstance(data, dict) else None
+        return load_last_launch(self.context.username)
 
     def _save_last_launch(self, version: str, profile: str) -> None:
         record = {
-            "provider": self._provider_id,
-            "variant": self._variant,
+            "game": paths.PROVIDER_MINECRAFT,
             "version": version,
             "profile": profile,
-            "use_mimalloc": self.mimalloc_check.get_active(),
         }
-        path = paths.user_last_launch(self.context.username)
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(record))
+            save_last_launch(self.context.username, record)
         except OSError:
             pass
         self._last_launch = record
-
-    def _default_variant(self) -> str | None:
-        return self._provider.default_variant(self.context.factorio_session)
 
     def _selected(self, combo: Gtk.DropDown) -> str | None:
         model = combo.get_model()
@@ -195,123 +117,31 @@ class ChooserScreen(Gtk.Box):
         item = model.get_item(idx)
         return item.get_string() if item else None
 
-    def _set_provider(self, provider_id: str) -> None:
-        self._provider_id = provider_id
-        self._provider = get_provider(provider_id)
-        remembered_variant = (self._last_launch or {}).get("variant")
-        variants = self._provider.available_variants(self.context.factorio_session)
-        if remembered_variant in variants:
-            self._variant = remembered_variant
-        else:
-            self._variant = self._provider.default_variant(self.context.factorio_session)
-
-    def _refresh_variants(self) -> None:
-        variants = self._provider.available_variants(self.context.factorio_session)
-        self.variant_label.set_label(self._provider.variant_label or "Variant")
-        self.variant_row.set_visible(bool(variants))
-        if not variants:
-            self.variant_combo.set_model(Gtk.StringList.new([]))
-            return
-        labels = [self._provider.display_variant(v) for v in variants]
-        self.variant_combo.set_model(Gtk.StringList.new(labels))
-        if self._variant in variants:
-            self.variant_combo.set_selected(variants.index(self._variant))
-        else:
-            self._variant = variants[0]
-            self.variant_combo.set_selected(0)
-
     def _refresh_versions(self) -> None:
-        installed = self._provider.list_installed(self._variant)
+        installed = self._provider.list_installed()
         items = installed or ["(none installed)"]
         self.version_combo.set_model(Gtk.StringList.new(items))
-        remembered = self._remembered("version")
-        if remembered and remembered in installed:
-            self.version_combo.set_selected(installed.index(remembered))
+        wanted = (self._last_launch or {}).get("version")
+        if wanted and wanted in installed:
+            self.version_combo.set_selected(installed.index(wanted))
         self.launch_button.set_sensitive(bool(installed))
         self.delete_version_button.set_sensitive(bool(installed))
 
     def _refresh_profiles(self) -> None:
-        on_disk = self._provider.list_profiles(self.context.username, self._variant)
-        default_profile = "default"
-        items = on_disk or [default_profile]
+        on_disk = self._provider.list_profiles(self.context.username)
+        items = on_disk or [DEFAULT_PROFILE]
         self.profile_combo.set_model(Gtk.StringList.new(items))
-        remembered = self._remembered("profile")
-        if remembered and remembered in items:
-            self.profile_combo.set_selected(items.index(remembered))
+        wanted = (self._last_launch or {}).get("profile")
+        if wanted and wanted in items:
+            self.profile_combo.set_selected(items.index(wanted))
         self.delete_profile_button.set_sensitive(bool(on_disk))
-
-    def _refresh_update_hint(self) -> None:
-        if self._provider_id != paths.PROVIDER_FACTORIO:
-            self.update_hint.set_visible(False)
-            return
-        key = (self._provider_id, self._variant)
-        cached = self._release_cache.get(key)
-        installed = self._provider.list_installed(self._variant)
-
-        def render(choices):
-            if not choices:
-                self.update_hint.set_visible(False)
-                return
-            newest = max(installed, key=parse_version, default=None)
-            latest = choices[0].version
-            if newest and parse_version(latest) <= parse_version(newest):
-                self.update_hint.set_visible(False)
-                return
-            label = choices[0].label if not newest else f"Update available: {latest} (you have {newest})"
-            self.update_hint.set_label(label)
-            self.update_hint.set_visible(True)
-
-        if cached is not None:
-            render(cached)
-            return
-
-        self.update_hint.set_visible(False)
-
-        def fetch():
-            return self._provider.release_choices(self.context.factorio_session, self._variant)
-
-        def done(choices):
-            self._release_cache[key] = choices
-            if self._provider_id == paths.PROVIDER_FACTORIO:
-                render(choices)
-
-        worker.run(fetch, on_done=done, on_error=lambda _exc: None)
-
-    def _refresh_all(self) -> None:
-        self.header_label.set_label(self._subtitle())
-        self.forget_button.set_visible(self.context.has_factorio_auth)
-        self.mimalloc_check.set_sensitive(self._provider_id == paths.PROVIDER_FACTORIO)
-        self.switch_button.set_visible(self.context.has_factorio_auth)
-        self._refresh_variants()
-        self._refresh_versions()
-        self._refresh_profiles()
-        self._refresh_update_hint()
-
-    def _on_provider_changed(self, *_args) -> None:
-        idx = self.provider_combo.get_selected()
-        if idx == Gtk.INVALID_LIST_POSITION:
-            return
-        self._set_provider(self._provider_ids[idx])
-        self.status.set_label("")
-        self._refresh_all()
-
-    def _on_variant_changed(self, *_args) -> None:
-        variants = self._provider.available_variants(self.context.factorio_session)
-        idx = self.variant_combo.get_selected()
-        if not variants or idx == Gtk.INVALID_LIST_POSITION or idx >= len(variants):
-            return
-        self._variant = variants[idx]
-        self.status.set_label("")
-        self._refresh_versions()
-        self._refresh_profiles()
-        self._refresh_update_hint()
 
     def _on_install_clicked(self, *_args) -> None:
         self.install_button.set_sensitive(False)
-        self.status.set_label(f"Looking up {self._provider.name} releases…")
+        self.status.set_label("Looking up Minecraft versions…")
 
         def fetch():
-            return self._provider.release_choices(self.context.factorio_session, self._variant)
+            return self._provider.release_choices()
 
         def done(choices):
             self.install_button.set_sensitive(True)
@@ -325,7 +155,7 @@ class ChooserScreen(Gtk.Box):
         worker.run(fetch, on_done=done, on_error=failed)
 
     def _show_install_dialog(self, choices) -> None:
-        dialog = Gtk.Window(title=f"Install {self._provider.name}", transient_for=self.get_root(), modal=True)
+        dialog = Gtk.Window(title="Install Minecraft", transient_for=self.get_root(), modal=True)
         box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=8,
             margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
@@ -382,11 +212,12 @@ class ChooserScreen(Gtk.Box):
         dialog.present()
 
     def _do_install(self, version: str) -> None:
-        self.status.set_label(f"Installing {self._provider.name} {version}…")
+        self.status.set_label(f"Installing Minecraft {version}…")
         self.progress.set_visible(True)
         self.progress.set_fraction(0.0)
         self.progress.set_text("")
         self.install_button.set_sensitive(False)
+        self.launch_button.set_sensitive(False)
 
         stats = ProgressStats()
 
@@ -399,27 +230,28 @@ class ChooserScreen(Gtk.Box):
             stats.update(done, total)
             GLib.idle_add(push)
 
+        def set_status(message: str):
+            GLib.idle_add(self.status.set_label, message)
+
         def install():
             return self._provider.install(
                 self.context.username,
                 version,
-                session=self.context.factorio_session,
-                variant=self._variant,
                 progress=cb,
+                status=set_status,
             )
 
         def done(_result):
             self.progress.set_visible(False)
             self.install_button.set_sensitive(True)
-            self.status.set_label(f"Installed {self._provider.name} {version}.")
-            self._release_cache.pop((self._provider_id, self._variant), None)
+            self.status.set_label(f"Minecraft {version} installed.")
             self._refresh_versions()
             self._refresh_profiles()
-            self._refresh_update_hint()
 
         def failed(exc):
             self.progress.set_visible(False)
             self.install_button.set_sensitive(True)
+            self.launch_button.set_sensitive(bool(self._provider.list_installed()))
             self.status.set_label(f"Install failed: {exc}")
 
         worker.run(install, on_done=done, on_error=failed)
@@ -430,7 +262,7 @@ class ChooserScreen(Gtk.Box):
             orientation=Gtk.Orientation.VERTICAL, spacing=8,
             margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
         )
-        box.append(Gtk.Label(label=f"Create a new {self._provider.name} profile", xalign=0))
+        box.append(Gtk.Label(label="Create a new Minecraft profile", xalign=0))
         entry = Gtk.Entry(placeholder_text="Profile name")
         box.append(entry)
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -449,9 +281,12 @@ class ChooserScreen(Gtk.Box):
                 return
             dialog.close()
             try:
-                self._provider.ensure_profile(self.context.username, name, self._variant)
+                self._provider.ensure_profile(self.context.username, name)
                 self.status.set_label(f"Created profile “{name}”.")
                 self._refresh_profiles()
+                profiles = self._provider.list_profiles(self.context.username)
+                if name in profiles:
+                    self.profile_combo.set_selected(profiles.index(name))
             except OSError as exc:
                 self.status.set_label(f"Create failed: {exc}")
 
@@ -470,7 +305,7 @@ class ChooserScreen(Gtk.Box):
             margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
         )
         box.append(Gtk.Label(
-            label=f"Delete the “{profile}” {self._provider.name} profile?\n\nThis removes that profile's saves, settings, and local state.",
+            label=f"Delete the “{profile}” Minecraft profile?\n\nThis removes that profile's worlds, settings, and local state.",
             wrap=True,
             xalign=0,
         ))
@@ -485,7 +320,7 @@ class ChooserScreen(Gtk.Box):
         def go(*_args):
             dialog.close()
             try:
-                self._provider.delete_profile(self.context.username, profile, self._variant)
+                self._provider.delete_profile(self.context.username, profile)
                 self.status.set_label(f"Deleted profile “{profile}”.")
                 self._refresh_profiles()
             except OSError as exc:
@@ -507,7 +342,7 @@ class ChooserScreen(Gtk.Box):
             margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
         )
         box.append(Gtk.Label(
-            label=f"Remove {self._provider.name} {version}?\n\nProfiles are kept; only the installed game files are deleted.",
+            label=f"Remove Minecraft {version}?\n\nProfiles and worlds are kept; only the installed game files are deleted.",
             wrap=True,
             xalign=0,
         ))
@@ -522,8 +357,8 @@ class ChooserScreen(Gtk.Box):
         def go(*_args):
             dialog.close()
             try:
-                self._provider.delete_version(version, self._variant)
-                self.status.set_label(f"Deleted {self._provider.name} {version}.")
+                self._provider.delete_version(version)
+                self.status.set_label(f"Deleted Minecraft {version}.")
                 self._refresh_versions()
             except OSError as exc:
                 self.status.set_label(f"Delete failed: {exc}")
@@ -534,78 +369,32 @@ class ChooserScreen(Gtk.Box):
         dialog.set_child(box)
         dialog.present()
 
-    def _on_forget_me(self, *_args) -> None:
-        if not self.context.has_factorio_auth:
-            return
-        dialog = Gtk.Window(title="Forget me", transient_for=self.get_root(), modal=True)
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=12,
-            margin_top=16, margin_bottom=16, margin_start=16, margin_end=16,
-        )
-        box.append(Gtk.Label(
-            label=(
-                f"Forget {self.context.username}?\n\n"
-                "The cached factorio.com session is deleted and Remember Me is cleared."
-            ),
-            wrap=True,
-            xalign=0,
-        ))
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions.set_halign(Gtk.Align.END)
-        cancel = Gtk.Button(label="Cancel")
-        cancel.connect("clicked", lambda *_: dialog.close())
-        actions.append(cancel)
-        confirm = Gtk.Button(label="Forget me")
-        confirm.add_css_class("destructive-action")
-
-        def go(*_args):
-            dialog.close()
-            sess_path = paths.user_session(self.context.username)
-            if sess_path.exists():
-                sess_path.unlink(missing_ok=True)
-            if paths.LAST_USER.exists():
-                try:
-                    if paths.LAST_USER.read_text().strip() == self.context.username:
-                        paths.LAST_USER.unlink()
-                except OSError:
-                    pass
-            self._on_switch_user()
-
-        confirm.connect("clicked", go)
-        actions.append(confirm)
-        box.append(actions)
-        dialog.set_child(box)
-        dialog.present()
-
     def _on_launch(self, *_args) -> None:
         version = self._selected(self.version_combo)
-        profile = self._selected(self.profile_combo) or "default"
+        profile = self._selected(self.profile_combo) or DEFAULT_PROFILE
         if not version or version == "(none installed)":
             return
-        self._provider.ensure_profile(self.context.username, profile, self._variant)
+        self._provider.ensure_profile(self.context.username, profile)
         self._save_last_launch(version, profile)
         self.launch_button.set_sensitive(False)
-        self.status.set_label(f"Launching {self._provider.name}…")
+        self.status.set_label("Launching Minecraft…")
 
         selection = LaunchSelection(
-            provider=self._provider_id,
+            provider=paths.PROVIDER_MINECRAFT,
             username=self.context.username,
             version=version,
             profile=profile,
-            variant=self._variant,
-            use_mimalloc=self.mimalloc_check.get_active(),
         )
 
         def do_launch():
-            proc = self._provider.launch(selection, session=self.context.factorio_session)
+            proc = self._provider.launch(selection)
             return proc.wait()
 
         def done(rc):
             self.launch_button.set_sensitive(True)
-            self.status.set_label(f"{self._provider.name} exited (status {rc}).")
+            self.status.set_label(f"Minecraft exited (status {rc}).")
             self._refresh_versions()
             self._refresh_profiles()
-            self._refresh_update_hint()
 
         def failed(exc):
             self.launch_button.set_sensitive(True)

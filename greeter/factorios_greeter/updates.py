@@ -1,7 +1,7 @@
-"""Check for and install Arch + factorios-* package updates.
+"""Check for and install Arch + GameOS package updates.
 
-Relies on a sudoers.d rule shipped by factorios-base that lets the
-factorios user run two exact pacman invocations without password:
+Relies on a sudoers.d rule shipped by gameos-base that lets the
+gameos user run two exact pacman invocations without password:
 
     sudo /usr/bin/pacman -Sy
     sudo /usr/bin/pacman --noconfirm -Syu

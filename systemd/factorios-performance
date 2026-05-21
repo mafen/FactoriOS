@@ -1,6 +1,7 @@
 #!/bin/bash
-# FactoriOS "gamemode" tuning, applied unconditionally because the
-# distro only runs Factorio. Adapted from FeralInteractive/gamemode's
+# GameOS "gamemode" tuning, applied unconditionally because the
+# distro only runs one foreground game at a time. Adapted from
+# FeralInteractive/gamemode's
 # defaults; we skip the parts that need vendor drivers we don't ship
 # (nvidia-settings), are laptop-specific in ways a kiosk never sees
 # (screensaver inhibition — labwc doesn't blank), or could actively
@@ -22,9 +23,8 @@ apply() {
     fi
 }
 
-# CPU governor: performance on every cpufreq policy. Factorio is
-# dominated by a single hot thread; schedutil/powersave underclock
-# it during load-time lulls in ways that visibly hurt UPS.
+# CPU governor: performance on every cpufreq policy so the active game
+# is not penalized by aggressive downclocking during load-time lulls.
 shopt -s nullglob
 for gov in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
     apply "${gov}" performance "cpu governor"

@@ -71,6 +71,7 @@ class FactorioProvider(GameProvider):
         session: Session | None = None,
         variant: str | None = None,
         progress=None,
+        status=None,
     ):
         if session is None:
             raise RuntimeError("Factorio install requires an authenticated session.")

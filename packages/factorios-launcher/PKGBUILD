@@ -1,10 +1,10 @@
 # Maintainer: FactoriOS
-pkgname=factorios-launcher
+pkgname=gameos-launcher
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="Shared game launcher library for FactoriOS"
+pkgdesc="Shared game launcher library for GameOS"
 arch=('any')
-url="https://example.invalid/factorios"
+url="https://example.invalid/gameos"
 license=('MIT')
 depends=('python' 'python-requests')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
@@ -26,9 +26,9 @@ package() {
     cd "$srcdir/launcher"
     python -m installer --destdir="$pkgdir" dist/*.whl
 
-    # /var/lib/factorios is owned by this package.
-    install -d -m 0755 "$pkgdir/var/lib/factorios"
-    install -d -m 0755 "$pkgdir/var/lib/factorios/versions"
-    install -d -m 0755 "$pkgdir/var/lib/factorios/users"
-    install -d -m 0755 "$pkgdir/var/lib/factorios/providers"
+    # /var/lib/gameos is owned by this package.
+    install -d -m 0755 "$pkgdir/var/lib/gameos"
+    install -d -m 0755 "$pkgdir/var/lib/gameos/versions"
+    install -d -m 0755 "$pkgdir/var/lib/gameos/users"
+    install -d -m 0755 "$pkgdir/var/lib/gameos/providers"
 }

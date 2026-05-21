@@ -5,11 +5,11 @@ if [[ "$(tty)" == "/dev/tty1" ]]; then
     cat <<'BANNER'
 
  ┌─────────────────────────────────────────────────┐
- │  Welcome to the FactoriOS installer.            │
+ │  Welcome to the GameOS installer.               │
  │                                                 │
- │  This will wipe a disk and install FactoriOS.   │
+ │  This will wipe a disk and install GameOS.      │
  │  Bring up the network with `nmtui` if needed,   │
- │  then re-run `factorios-install` if it bails.   │
+ │  then re-run `gameos-install` if it bails.      │
  └─────────────────────────────────────────────────┘
 
 BANNER
@@ -24,10 +24,10 @@ BANNER
     fi
 
     if ping -c1 -W2 archlinux.org >/dev/null 2>&1; then
-        /usr/local/bin/factorios-install
+        /usr/local/bin/gameos-install
     else
         echo "No network detected — bring it up with 'nmtui', then run:"
-        echo "    factorios-install"
+        echo "    gameos-install"
         echo
     fi
 fi
