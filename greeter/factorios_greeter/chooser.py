@@ -17,6 +17,7 @@ from . import power, updates, worker
 from .context import UserContext
 
 DEFAULT_PROFILE = "default"
+PROGRESS_LOG_STEP_PERCENT = 10
 
 
 class ChooserScreen(Gtk.Box):
@@ -28,6 +29,10 @@ class ChooserScreen(Gtk.Box):
         self._on_switch_user = on_switch_user
         self._provider = get_provider(paths.PROVIDER_MINECRAFT)
         self._last_launch = self._load_last_launch()
+        self._last_progress_log_percent: int | None = None
+        self._last_progress_log_text = ""
+        self._debug_window: Gtk.Window | None = None
+        self._debug_status: Gtk.Label | None = None
 
         shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         shell.set_vexpand(True)
@@ -119,6 +124,10 @@ class ChooserScreen(Gtk.Box):
         updates_btn.add_css_class("flat")
         updates_btn.connect("clicked", lambda *_: updates.show_dialog(self))
         footer.append(updates_btn)
+        debug_btn = Gtk.Button(label="Debug logs…")
+        debug_btn.add_css_class("flat")
+        debug_btn.connect("clicked", self._show_debug_window)
+        footer.append(debug_btn)
         footer.append(Gtk.Box(hexpand=True))
         footer.append(power.make_row())
         card.append(footer)
@@ -170,6 +179,8 @@ class ChooserScreen(Gtk.Box):
 
     def _set_status(self, message: str, *, log: bool = True) -> None:
         self.status.set_label(message)
+        if self._debug_status is not None:
+            self._debug_status.set_label(message)
         if log and message:
             self._append_log(message)
 
@@ -181,11 +192,94 @@ class ChooserScreen(Gtk.Box):
         self.log_view.scroll_to_iter(buf.get_end_iter(), 0.0, False, 0.0, 0.0)
 
     def _clear_log(self) -> None:
+        self._last_progress_log_percent = None
+        self._last_progress_log_text = ""
         self.log_view.get_buffer().set_text("")
+
+    def _show_debug_window(self, *_args) -> None:
+        if self._debug_window is not None:
+            self._debug_window.present()
+            return
+
+        window = Gtk.Window(title="GameOS Debug Logs", transient_for=self.get_root(), modal=False)
+        window.set_default_size(980, 700)
+
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=12,
+            margin_top=16,
+            margin_bottom=16,
+            margin_start=16,
+            margin_end=16,
+        )
+
+        title = Gtk.Label(label="Installer and launcher debug log", xalign=0)
+        title.add_css_class("title-3")
+        box.append(title)
+
+        status = Gtk.Label(label=self.status.get_label(), xalign=0)
+        status.add_css_class("dim-label")
+        status.set_wrap(True)
+        status.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        box.append(status)
+        self._debug_status = status
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_vexpand(True)
+        scroller.set_hexpand(True)
+        view = Gtk.TextView()
+        view.set_editable(False)
+        view.set_cursor_visible(False)
+        view.set_monospace(True)
+        view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        view.set_buffer(self.log_view.get_buffer())
+        scroller.set_child(view)
+        box.append(scroller)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        clear_btn = Gtk.Button(label="Clear")
+        clear_btn.connect("clicked", lambda *_: self._clear_log())
+        actions.append(clear_btn)
+        actions.append(Gtk.Box(hexpand=True))
+        close_btn = Gtk.Button(label="Close")
+        close_btn.connect("clicked", lambda *_: window.close())
+        actions.append(close_btn)
+        box.append(actions)
+
+        def on_close(*_args):
+            self._debug_status = None
+            self._debug_window = None
+            return False
+
+        window.connect("close-request", on_close)
+        window.set_child(box)
+        self._debug_window = window
+        window.present()
+
+    def _log_progress_snapshot(self, stats: ProgressStats) -> None:
+        label = stats.label()
+        percent = int(stats.fraction * 100) if stats.total else None
+        should_log = False
+        if not label or label == self._last_progress_log_text:
+            return
+        if percent is None:
+            should_log = self._last_progress_log_text == ""
+        elif self._last_progress_log_percent is None:
+            should_log = True
+        elif percent >= 100:
+            should_log = True
+        elif percent >= self._last_progress_log_percent + PROGRESS_LOG_STEP_PERCENT:
+            should_log = True
+        if not should_log:
+            return
+        self._last_progress_log_percent = percent
+        self._last_progress_log_text = label
+        self._append_log(f"Progress: {label}")
 
     def _on_install_clicked(self, *_args) -> None:
         self.install_button.set_sensitive(False)
         self._set_status("Looking up Minecraft versions…")
+        self._append_log("Requesting available Minecraft versions from Mojang...")
 
         def fetch():
             return self._provider.release_choices()
@@ -193,6 +287,7 @@ class ChooserScreen(Gtk.Box):
         def done(choices):
             self.install_button.set_sensitive(True)
             self.status.set_label("")
+            self._append_log(f"Found {len(choices)} suggested version option(s).")
             self._show_install_dialog(choices)
 
         def failed(exc):
@@ -261,6 +356,8 @@ class ChooserScreen(Gtk.Box):
     def _do_install(self, version: str) -> None:
         self._clear_log()
         self._set_status(f"Installing Minecraft {version}…")
+        self._append_log(f"Selected version: {version}")
+        self._append_log(f"Target profile root: {paths.user_provider_profiles(self.context.username, paths.PROVIDER_MINECRAFT)}")
         self.progress.set_visible(True)
         self.progress.set_fraction(0.0)
         self.progress.set_text("")
@@ -272,6 +369,7 @@ class ChooserScreen(Gtk.Box):
         def push():
             self.progress.set_fraction(stats.fraction)
             self.progress.set_text(stats.label())
+            self._log_progress_snapshot(stats)
             return False
 
         def cb(done, total):
@@ -293,6 +391,8 @@ class ChooserScreen(Gtk.Box):
             self.progress.set_visible(False)
             self.install_button.set_sensitive(True)
             self._set_status(f"Minecraft {version} installed.")
+            installed = self._provider.list_installed()
+            self._append_log(f"Install complete. Installed versions now: {', '.join(installed) if installed else '(none)'}")
             self._refresh_versions()
             self._refresh_profiles()
 
@@ -331,6 +431,7 @@ class ChooserScreen(Gtk.Box):
             try:
                 self._provider.ensure_profile(self.context.username, name)
                 self._set_status(f"Created profile “{name}”.")
+                self._append_log(f"Created profile directory for {name}.")
                 self._refresh_profiles()
                 profiles = self._provider.list_profiles(self.context.username)
                 if name in profiles:
@@ -370,6 +471,7 @@ class ChooserScreen(Gtk.Box):
             try:
                 self._provider.delete_profile(self.context.username, profile)
                 self._set_status(f"Deleted profile “{profile}”.")
+                self._append_log(f"Deleted profile data for {profile}.")
                 self._refresh_profiles()
             except OSError as exc:
                 self._set_status(f"Delete failed: {exc}")
@@ -407,6 +509,7 @@ class ChooserScreen(Gtk.Box):
             try:
                 self._provider.delete_version(version)
                 self._set_status(f"Deleted Minecraft {version}.")
+                self._append_log(f"Removed installed game files for Minecraft {version}.")
                 self._refresh_versions()
             except OSError as exc:
                 self._set_status(f"Delete failed: {exc}")
@@ -427,6 +530,7 @@ class ChooserScreen(Gtk.Box):
         self.launch_button.set_sensitive(False)
         self._clear_log()
         self._set_status("Launching Minecraft…")
+        self._append_log(f"Launching version {version} with profile {profile}.")
 
         selection = LaunchSelection(
             provider=paths.PROVIDER_MINECRAFT,
@@ -442,6 +546,7 @@ class ChooserScreen(Gtk.Box):
         def done(rc):
             self.launch_button.set_sensitive(True)
             self._set_status(f"Minecraft exited (status {rc}).")
+            self._append_log(f"Game process exited with status {rc}.")
             self._refresh_versions()
             self._refresh_profiles()
 
